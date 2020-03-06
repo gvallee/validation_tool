@@ -215,7 +215,7 @@ func Run(exp Config, sysCfg *sys.Config, syConfig *sy.MPIToolConfig) (bool, resu
 	}
 
 	/* Capture the hardware/system configuration in order to capture provence of the experiment */
-	SOMETHING
+	//SOMETHING
 
 	/* Install MPI on the host */
 	execRes = b.InstallOnHost(&myHostMPICfg.Implem, &myHostMPICfg.Buildenv, sysCfg)

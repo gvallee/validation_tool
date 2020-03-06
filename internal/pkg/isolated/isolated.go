@@ -6,8 +6,6 @@
 package isolated
 
 import (
-	"fmt"
-
 	"github.com/sylabs/syvalidate/internal/pkg/blockchain"
 	"github.com/sylabs/syvalidate/internal/pkg/hashcash"
 )
@@ -23,6 +21,7 @@ func chain(b blockchain.Block) error {
 }
 
 func CreateBlock(stamp hashcash.Stamp) error {
+	/*
 	// Because we combine a blockchain and a file system, we need to:
 	// 1. actually create a new block
 	// 2. chain it to the previous block, which automatically saves the data into the FS
@@ -39,6 +38,7 @@ func CreateBlock(stamp hashcash.Stamp) error {
 	if err != nil {
 		return fmt.Errorf("failed to chain block: %s", err)
 	}
+	*/
 
 	return nil
 }

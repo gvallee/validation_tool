@@ -8,11 +8,13 @@ package blockchain
 // LocalStore stores the blockchain locally using our
 // BlockFS file system
 func (b *Block) LocalStore() error {
+	/*
 	// Write all manifests to the FS
 	sz, err = fs.Write()
 
 	// Write the block itself
 	sz, err = fs.Write()
+	*/
 
 	return nil
 }
