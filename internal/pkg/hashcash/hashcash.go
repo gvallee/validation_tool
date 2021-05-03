@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sylabs/syvalidate/internal/pkg/hash"
+	"github.com/gvallee/validation_tool/internal/pkg/hash"
 )
 
 const (

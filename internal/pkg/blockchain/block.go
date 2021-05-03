@@ -8,8 +8,7 @@ package blockchain
 import (
 	"fmt"
 
-	"github.com/sylabs/singularity-mpi/pkg/sys"
-	"github.com/sylabs/syvalidate/internal/pkg/hashcash"
+	"github.com/gvallee/validation_tool/internal/pkg/hashcash"
 )
 
 type Block struct {
@@ -83,7 +82,7 @@ func ConnectedCreate(stamp hashcash.Stamp) error {
 }
 
 // Publish submit the block, which will link it to the previous block
-func (b *Block) Publish(sysCfg *sys.Config) error {
+func (b *Block) Publish() error {
 	// Commit the block which persists the data
 	err := b.commitBlock()
 	if err != nil {

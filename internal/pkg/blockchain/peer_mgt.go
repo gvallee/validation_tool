@@ -10,8 +10,8 @@ import (
 	"fmt"
 
 	"github.com/gvallee/syserror/pkg/syserror"
-	"github.com/sylabs/syvalidate/internal/pkg/cache"
-	"github.com/sylabs/syvalidate/internal/pkg/comm"
+	"github.com/gvallee/validation_tool/internal/pkg/cache"
+	"github.com/gvallee/validation_tool/internal/pkg/comm"
 )
 
 func sendListNameSpaces(peer *comm.PeerInfo, namespaces []Namespace) error {

@@ -5,7 +5,7 @@
 
 package blockchain
 
-import "github.com/sylabs/syvalidate/internal/pkg/comm"
+import "github.com/gvallee/validation_tool/internal/pkg/comm"
 
 // This package implements a version of the Practical Byzantine Fault Tolerance algorithm (pBFT)
 

@@ -12,14 +12,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sylabs/singularity-mpi/pkg/manifest"
-	"github.com/sylabs/singularity-mpi/pkg/syexec"
+	"github.com/gvallee/go_exec/pkg/advexec"
+	"github.com/gvallee/validation_tool/internal/pkg/manifest"
 )
 
 func createManifestForCmdOutput(dir string, cmdBin string, args []string) error {
-	var cmd syexec.SyCmd
+	var cmd advexec.Advcmd
 	var err error
-	var execRes syexec.Result
+	var execRes advexec.Result
 
 	// get output of uname -msron and save it
 	cmd.BinPath, err = exec.LookPath(cmdBin)

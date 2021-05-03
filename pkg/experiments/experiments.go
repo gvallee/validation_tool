@@ -1,4 +1,5 @@
 // Copyright (c) 2019, Sylabs Inc. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 // This software is licensed under a 3-clause BSD license. Please consult the
 // LICENSE.md file distributed with the sources of this project regarding your
 // rights to use or distribute this software.
@@ -8,49 +9,63 @@ package experiments
 import (
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/gvallee/go_util/pkg/util"
-	"github.com/sylabs/singularity-mpi/pkg/app"
-	"github.com/sylabs/singularity-mpi/pkg/buildenv"
-	"github.com/sylabs/singularity-mpi/pkg/builder"
-	"github.com/sylabs/singularity-mpi/pkg/container"
-	"github.com/sylabs/singularity-mpi/pkg/implem"
-	"github.com/sylabs/singularity-mpi/pkg/jm"
-	"github.com/sylabs/singularity-mpi/pkg/launcher"
-	"github.com/sylabs/singularity-mpi/pkg/mpi"
-	"github.com/sylabs/singularity-mpi/pkg/results"
-	"github.com/sylabs/singularity-mpi/pkg/sy"
-	"github.com/sylabs/singularity-mpi/pkg/syexec"
-	"github.com/sylabs/singularity-mpi/pkg/sys"
+	"github.com/gvallee/go_exec/pkg/advexec"
+	"github.com/gvallee/go_exec/pkg/results"
+	"github.com/gvallee/go_hpc_jobmgr/pkg/implem"
+	"github.com/gvallee/go_hpc_jobmgr/pkg/job"
+	"github.com/gvallee/go_hpc_jobmgr/pkg/launcher"
+	"github.com/gvallee/go_hpc_jobmgr/pkg/mpi"
+	"github.com/gvallee/go_software_build/pkg/app"
+	"github.com/gvallee/go_software_build/pkg/buildenv"
+	"github.com/gvallee/go_software_build/pkg/builder"
+	"github.com/gvallee/validation_tool/pkg/platform"
 )
 
-// Config is a structure that represents the configuration of an experiment
-type Config struct {
-	// HostMPI gathers all the data about the MPI to use on the host
-	HostMPI implem.Info
+type MPIConfig struct {
+	// MPI holds all the details about the MPI implementation to use
+	MPI *implem.Info
 
-	// ContainerMPI gathers all the data about the MPI to use in the container
-	ContainerMPI implem.Info
+	// BuildEnv is the environment to use for the experiment(s)
+	BuildEnv buildenv.Info
+}
 
-	// Container gathers all the data about the container
-	Container container.Config
-
-	// HostBuildEnv gathers all the data about the environment to use to build the software for the host
-	HostBuildEnv buildenv.Info
-
-	// ContainerBuildEnv gathers all the data about the environment to use to build the software for the container
-	ContainerBuildEnv buildenv.Info
-
+type Experiment struct {
 	// App gathers all the data about the application to include in the container
-	App app.Info
+	App *app.Info
 
 	// Result gathers all the data related to the result of an experiment
 	Result results.Result
+
+	// MpirunArgs is a list of mpirun arguments to use for the experiment
+	MpirunArgs []string
+
+	// Env gathers all the data related to how software has been installed
+	Env *buildenv.Info
+
+	// Platform gathers all the data required to execute experiments on a target platform
+	Platform *platform.Info
 }
 
+type Info struct {
+	MPICfg *MPIConfig
+
+	// App gathers all the data about the application to include in the container
+	App *app.Info
+
+	List []*Experiment
+
+	// Result gathers all the data related to the result of an experiment
+	Result results.Result
+
+	// Env gathers all the data related to how software has been installed
+	Env *buildenv.Info
+
+	// Platform gathers all the data required to execute experiments on a target platform
+	Platform *platform.Info
+}
+
+/*
 func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
 	if sysCfg.NetPipe {
 		lines := strings.Split(output, "\n")
@@ -64,220 +79,95 @@ func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
 	}
 	return "", nil
 }
+*/
 
-// GetImplemFromExperiments returns the MPI implementation that is associated
-// to the experiments
-func GetMPIImplemFromExperiments(experiments []Config) (*implem.Info, error) {
-	// Fair assumption: all experiments are based on the same MPI
-	// implementation (we actually check for that and the implementation
-	// is only included in the experiment structure so that the structure
-	// is self-contained).
-	if len(experiments) == 0 {
-		return nil, fmt.Errorf("no experiment")
-	}
+func processOutput(execRes *advexec.Result, expRes *results.Result, appInfo *app.Info) error {
+	/*
+		var err error
 
-	return &experiments[0].HostMPI, nil
-}
-
-func createNewContainer(myContainerMPICfg *mpi.Config, exp Config, sysCfg *sys.Config, syConfig *sy.MPIToolConfig) syexec.Result {
-	var res syexec.Result
-
-	/* CREATE THE CONTAINER MPI CONFIGURATION */
-	if sysCfg.Persistent != "" && util.FileExists(myContainerMPICfg.Container.Path) {
-		log.Printf("* %s already exists, skipping...\n", myContainerMPICfg.Container.Path)
-		return res
-	}
-
-	/* CREATE THE MPI CONTAINER */
-
-	res = createMPIContainer(&exp.App, myContainerMPICfg, &exp.ContainerBuildEnv, sysCfg)
-	if res.Err != nil {
-		err := launcher.SaveErrorDetails(&exp.HostMPI, &myContainerMPICfg.Implem, sysCfg, &res)
+		expRes.Note, err = postExecutionDataMgt(sysCfg, execRes.Stdout)
 		if err != nil {
-			res.Err = fmt.Errorf("failed to save error details: %s", err)
-			return res
+			return fmt.Errorf("failed process data post execution: %s", err)
 		}
-		res.Err = fmt.Errorf("failed to create container: %s", res.Err)
-		return res
-	}
 
-	return res
-}
-
-func processOutput(execRes *syexec.Result, expRes *results.Result, appInfo *app.Info, sysCfg *sys.Config) error {
-	var err error
-
-	expRes.Note, err = postExecutionDataMgt(sysCfg, execRes.Stdout)
-	if err != nil {
-		return fmt.Errorf("failed process data post execution: %s", err)
-	}
-
-	if appInfo.ExpectedNote != "" {
-		if !strings.Contains(expRes.Note, appInfo.ExpectedNote) {
-			return fmt.Errorf("the data from the application's output does not match with the expected output: %s vs. %s", expRes.Note, appInfo.ExpectedNote)
+		if appInfo.ExpectedNote != "" {
+			if !strings.Contains(expRes.Note, appInfo.ExpectedNote) {
+				return fmt.Errorf("the data from the application's output does not match with the expected output: %s vs. %s", expRes.Note, appInfo.ExpectedNote)
+			}
 		}
-	}
 
-	log.Println("NOTE: ", expRes.Note)
+		log.Println("NOTE: ", expRes.Note)
+	*/
 
 	return nil
 }
 
-func setExperimentCfg(exp Config, sysCfg *sys.Config, syConfig *sy.MPIToolConfig) (mpi.Config, mpi.Config, error) {
-	var myHostMPICfg mpi.Config
-	var myContainerMPICfg mpi.Config
-
-	myHostMPICfg.Buildenv = exp.HostBuildEnv
-	myHostMPICfg.Implem = exp.HostMPI
-
-	if !util.PathExists(myHostMPICfg.Buildenv.BuildDir) {
-		err := os.MkdirAll(myHostMPICfg.Buildenv.BuildDir, 0755)
-		if err != nil {
-			return myHostMPICfg, myContainerMPICfg, fmt.Errorf("failed to create %s: %s", myHostMPICfg.Buildenv.BuildDir, err)
-		}
-	} else {
-		log.Printf("Build directory on host already exists: %s", myHostMPICfg.Buildenv.BuildDir)
-	}
-	if !util.PathExists(myHostMPICfg.Buildenv.ScratchDir) {
-		err := os.MkdirAll(myHostMPICfg.Buildenv.ScratchDir, 0755)
-		if err != nil {
-			return myHostMPICfg, myContainerMPICfg, fmt.Errorf("failed to create %s: %s", myHostMPICfg.Buildenv.ScratchDir, err)
-		}
-	} else {
-		log.Printf("Build directory on host already exists: %s", myHostMPICfg.Buildenv.ScratchDir)
-	}
-
-	myContainerMPICfg.Implem = exp.ContainerMPI
-	myContainerMPICfg.Buildenv = exp.ContainerBuildEnv
-	myContainerMPICfg.Container.Name = container.GetContainerDefaultName(exp.Container.Distro, exp.ContainerMPI.ID, exp.ContainerMPI.Version, exp.App.Name, container.HybridModel) + ".sif"
-	myContainerMPICfg.Container.Path = filepath.Join(myContainerMPICfg.Buildenv.InstallDir, myContainerMPICfg.Container.Name)
-	exp.Container.Path = myContainerMPICfg.Container.Path
-	myContainerMPICfg.Container.Model = container.HybridModel
-	myContainerMPICfg.Container.URL = sy.GetImageURL(&myContainerMPICfg.Implem, sysCfg)
-	myContainerMPICfg.Container.BuildDir = myContainerMPICfg.Buildenv.BuildDir
-	myContainerMPICfg.Container.InstallDir = myContainerMPICfg.Buildenv.InstallDir
-	myContainerMPICfg.Container.Distro = exp.Container.Distro
-
-	if !util.PathExists(myContainerMPICfg.Buildenv.BuildDir) {
-		err := os.MkdirAll(myContainerMPICfg.Buildenv.BuildDir, 0755)
-		if err != nil {
-			return myHostMPICfg, myContainerMPICfg, fmt.Errorf("failed to create %s: %s", myContainerMPICfg.Buildenv.BuildDir, err)
-		}
-	} else {
-		log.Printf("Build directory on host already exists: %s", myContainerMPICfg.Buildenv.BuildDir)
-	}
-	if !util.PathExists(myContainerMPICfg.Buildenv.ScratchDir) {
-		err := os.MkdirAll(myContainerMPICfg.Buildenv.ScratchDir, 0755)
-		if err != nil {
-			return myHostMPICfg, myContainerMPICfg, fmt.Errorf("failed to create %s: %s", myContainerMPICfg.Buildenv.ScratchDir, err)
-		}
-	} else {
-		log.Printf("Build directory on host already exists: %s", myContainerMPICfg.Buildenv.ScratchDir)
-	}
-
-	log.Println("* Host MPI Configuration *")
-	log.Println("-> Building MPI in", myHostMPICfg.Buildenv.BuildDir)
-	log.Println("-> Installing MPI in", myHostMPICfg.Buildenv.InstallDir)
-	log.Println("-> MPI implementation:", myHostMPICfg.Implem.ID)
-	log.Println("-> MPI version:", myHostMPICfg.Implem.Version)
-	log.Println("-> MPI URL:", myHostMPICfg.Implem.URL)
-
-	log.Println("* Container MPI configuration *")
-	log.Println("-> Build container in", exp.ContainerBuildEnv.BuildDir)
-	log.Println("-> Target Linux distribution in container:", exp.Container.Distro)
-	log.Println("-> Storing container in", exp.ContainerBuildEnv.InstallDir)
-	log.Println("-> Container full path: ", exp.Container.Path)
-	log.Println("-> MPI implementation:", myContainerMPICfg.Implem.ID)
-	log.Println("-> MPI version:", myContainerMPICfg.Implem.Version)
-	log.Println("-> MPI URL:", myContainerMPICfg.Implem.URL)
-
-	return myHostMPICfg, myContainerMPICfg, nil
-}
-
-// Run configure, install and execute a given experiment
-func Run(exp Config, sysCfg *sys.Config, syConfig *sy.MPIToolConfig) (bool, results.Result, syexec.Result) {
+func (e *Experiment) Run(mpiCfg *MPIConfig) (bool, results.Result, advexec.Result) {
 	var expRes results.Result
-	var execRes syexec.Result
+	var execRes advexec.Result
 
-	/* Figure out details about the experiment's configuration */
-	myHostMPICfg, myContainerMPICfg, err := setExperimentCfg(exp, sysCfg, syConfig)
-	if err != nil {
-		execRes.Err = fmt.Errorf("failed to set experiment's configuration: %s", err)
-		expRes.Pass = false
-		return false, expRes, execRes
-	}
-	jobmgr := jm.Detect()
-	b, err := builder.Load(&myHostMPICfg.Implem)
+	b := new(builder.Builder)
+	b.Env.ScratchDir = e.Env.ScratchDir
+	b.Env.InstallDir = e.Env.InstallDir
+	b.Env.BuildDir = e.Env.BuildDir
+	b.App.Name = e.App.Name
+	b.App.URL = e.App.URL
+
+	err := b.Load(true)
 	if err != nil {
 		execRes.Err = fmt.Errorf("unable to load a builder: %s", err)
 		expRes.Pass = false
 		return false, expRes, execRes
 	}
-
-	/* Capture the hardware/system configuration in order to capture provence of the experiment */
-	//SOMETHING
-
-	/* Install MPI on the host */
-	execRes = b.InstallOnHost(&myHostMPICfg.Implem, &myHostMPICfg.Buildenv, sysCfg)
-	if execRes.Err != nil {
-		execRes.Err = fmt.Errorf("failed to install MPI on host")
-		err = launcher.SaveErrorDetails(&exp.HostMPI, &myContainerMPICfg.Implem, sysCfg, &execRes)
-		if err != nil {
-			execRes.Err = fmt.Errorf("failed to save error details: %s", err)
-		}
+	res := b.Install()
+	if res.Err != nil {
+		execRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
 		expRes.Pass = false
 		return false, expRes, execRes
 	}
-	if !sys.IsPersistent(sysCfg) {
-		defer func() {
-			execRes = b.UninstallHost(&myHostMPICfg.Implem, &myHostMPICfg.Buildenv, sysCfg)
-			if execRes.Err != nil {
-				log.Fatalf("failed to uninstall MPI: %s", err)
-			}
-		}()
+
+	sysCfg, jobMgr, err := launcher.Load()
+	if err != nil {
+		execRes.Err = fmt.Errorf("unable to load a launcher: %s", err)
+		expRes.Pass = false
+		return false, expRes, execRes
+	}
+	sysCfg.ScratchDir = e.Env.ScratchDir
+	var expMPICfg mpi.Config
+	expMPICfg.Implem.InstallDir = mpiCfg.BuildEnv.InstallDir
+	expMPICfg.UserMpirunArgs = e.MpirunArgs // fixme: add the default args we get from config file
+	err = expMPICfg.Implem.Load()
+	if err != nil {
+		execRes.Err = fmt.Errorf("unable to detect information about the MPI implementation to use: %s", err)
+		expRes.Pass = false
+		return false, expRes, execRes
 	}
 
-	/* Prepare the container image */
-	if syConfig.BuildPrivilege || sysCfg.Nopriv {
-		if !util.PathExists(exp.Container.Path) {
-			execRes = createNewContainer(&myContainerMPICfg, exp, sysCfg, syConfig)
-			if execRes.Err != nil {
-				execRes.Err = fmt.Errorf("failed to create container: %s", err)
-				expRes.Pass = false
-				return false, expRes, execRes
-			}
-		} else {
-			log.Printf("%s already exists, skipping build\n", exp.Container.Path)
-		}
-	} else {
-		err = container.PullContainerImage(&myContainerMPICfg.Container, &myContainerMPICfg.Implem, sysCfg, syConfig)
-		if err != nil {
-			execRes.Err = fmt.Errorf("failed to pull container: %s", err)
-			expRes.Pass = false
-			return false, expRes, execRes
-		}
-	}
-
-	/* Prepare the command to run the actual experiment */
-	log.Println("* Running Test(s)...")
-
-	expRes, execRes = launcher.Run(&exp.App, &myHostMPICfg, &exp.HostBuildEnv, &myContainerMPICfg, &jobmgr, sysCfg, nil)
+	var newjob job.Job
+	newjob.Partition = e.Platform.Name
+	newjob.App.Name = e.App.BinName
+	newjob.App.BinArgs = e.App.BinArgs
+	newjob.App.BinName = e.App.BinName
+	newjob.App.BinPath = e.App.BinPath
+	newjob.Name = e.App.Name
+	expRes, execRes = launcher.Run(&newjob, &expMPICfg, &jobMgr, &sysCfg, nil)
 	if !expRes.Pass {
 		return false, expRes, execRes
 	}
 	if execRes.Err != nil {
 		execRes.Err = fmt.Errorf("failed to run experiment: %s", execRes.Err)
-		err = launcher.SaveErrorDetails(&exp.HostMPI, &myContainerMPICfg.Implem, sysCfg, &execRes)
-		if err != nil {
-			execRes.Err = fmt.Errorf("failed to save error details: %s", err)
-		}
+		/*
+			err = launcher.SaveErrorDetails(&exp.HostMPI, &myContainerMPICfg.Implem, sysCfg, &execRes)
+			if err != nil {
+				execRes.Err = fmt.Errorf("failed to save error details: %s", err)
+			}
+		*/
 		expRes.Pass = false
 		return false, expRes, execRes
 	}
-
 	log.Printf("* Successful run - Analysing data...")
 
-	err = processOutput(&execRes, &expRes, &exp.App, sysCfg)
+	err = processOutput(&execRes, &expRes, e.App)
 	if err != nil {
 		execRes.Err = fmt.Errorf("failed to process output: %s", err)
 		expRes.Pass = false
@@ -291,71 +181,22 @@ func Run(exp Config, sysCfg *sys.Config, syConfig *sy.MPIToolConfig) (bool, resu
 	return false, expRes, execRes
 }
 
-// GetOutputFilename returns the name of the file that is associated to the experiments
-// to run
-func GetOutputFilename(mpiImplem string, sysCfg *sys.Config) error {
-	sysCfg.OutputFile = mpiImplem + "-init-results.txt"
-
-	if sysCfg.NetPipe {
-		sysCfg.OutputFile = mpiImplem + "-netpipe-results.txt"
-	}
-
-	if sysCfg.IMB {
-		sysCfg.OutputFile = mpiImplem + "-imb-results.txt"
-	}
-
-	return nil
-}
-
-// createMPIContainer creates a container based on a specific configuration.
-func createMPIContainer(appInfo *app.Info, mpiCfg *mpi.Config, env *buildenv.Info, sysCfg *sys.Config) syexec.Result {
-	var res syexec.Result
-	var b builder.Builder
-
-	containerCfg := &mpiCfg.Container
-
-	b, res.Err = builder.Load(&mpiCfg.Implem)
-	if res.Err != nil {
-		return res
-	}
-
-	log.Println("Creating MPI container...")
-	res.Err = b.GenerateDeffile(appInfo, &mpiCfg.Implem, env, containerCfg, sysCfg)
-	if res.Err != nil {
-		res.Stderr = fmt.Sprintf("failed to generate Singularity definition file: %s", res.Err)
-		log.Printf("%s\n", res.Stderr)
-		return res
-	}
-
-	res.Err = container.Create(&mpiCfg.Container, sysCfg)
-	if res.Err != nil {
-		res.Stderr = fmt.Sprintf("failed to create container image: %s", res.Err)
-		log.Printf("%s\n", res.Stderr)
-		return res
-	}
-
-	return res
-}
-
-// Pruning removes the experiments for which we already have results
-func Pruning(experiments []Config, existingResults []results.Result) []Config {
-	// No optimization at the moment, double loop and creation of a new array
-	var experimentsToRun []Config
-	//	for j := 0; j < len(experiments); j++ {
-	for _, experiment := range experiments {
-		found := false
-		for _, result := range existingResults {
-			if experiment.HostMPI.Version == result.HostMPI.Version && experiment.ContainerMPI.Version == result.ContainerMPI.Version {
-				log.Printf("We already have results for %s on the host and %s in a container, skipping...\n", experiment.HostMPI.Version, experiment.ContainerMPI.Version)
-				found = true
-				break
-			}
+func (e *Info) Run() bool {
+	validationStatus := true
+	for _, exp := range e.List {
+		if e.App != nil && exp.App == nil {
+			exp.App = e.App
 		}
-		if !found {
-			// No associated results
-			experimentsToRun = append(experimentsToRun, experiment)
+		if e.Env != nil && exp.Env == nil {
+			exp.Env = e.Env
+		}
+		if e.Platform != nil && exp.Platform == nil {
+			exp.Platform = e.Platform
+		}
+		pass, _, _ := exp.Run(e.MPICfg)
+		if !pass && validationStatus {
+			validationStatus = false
 		}
 	}
-
-	return experimentsToRun
+	return validationStatus
 }

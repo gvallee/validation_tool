@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sylabs/syvalidate/internal/pkg/hash"
+	"github.com/gvallee/validation_tool/internal/pkg/hash"
 )
 
 const (

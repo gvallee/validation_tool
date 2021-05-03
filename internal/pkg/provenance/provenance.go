@@ -11,9 +11,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sylabs/singularity-mpi/pkg/manifest"
-	"github.com/sylabs/syvalidate/internal/pkg/sys"
-	"github.com/sylabs/syvalidate/pkg/syblockchainfs"
+	"github.com/gvallee/validation_tool/internal/pkg/manifest"
+	"github.com/gvallee/validation_tool/internal/pkg/sys"
+	"github.com/gvallee/validation_tool/pkg/syblockchainfs"
 )
 
 type Provenance struct {

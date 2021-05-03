@@ -8,10 +8,9 @@ package syblockchainfs
 import (
 	"fmt"
 
-	"github.com/sylabs/singularity-mpi/pkg/sys"
-	"github.com/sylabs/syvalidate/internal/pkg/connected"
-	"github.com/sylabs/syvalidate/internal/pkg/hashcash"
-	"github.com/sylabs/syvalidate/internal/pkg/isolated"
+	"github.com/gvallee/validation_tool/internal/pkg/connected"
+	"github.com/gvallee/validation_tool/internal/pkg/hashcash"
+	"github.com/gvallee/validation_tool/internal/pkg/isolated"
 )
 
 type Mode int
@@ -31,7 +30,7 @@ type CreateBlockFn func(hashcash.Stamp) error
 type SyBlockchainFS struct {
 	info Info
 
-	sysCfg *sys.Config
+	//sysCfg *sys.Config
 
 	// CreateStamp is the function that creates a new stamp
 	CreateStamp CreateStampFn

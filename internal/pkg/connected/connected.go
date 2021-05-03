@@ -5,7 +5,7 @@
 
 package connected
 
-import "github.com/sylabs/syvalidate/internal/pkg/hashcash"
+import "github.com/gvallee/validation_tool/internal/pkg/hashcash"
 
 func CreateBlock(stamp hashcash.Stamp) error {
 	// Because we combine a blockchain and a file system, we need to:
