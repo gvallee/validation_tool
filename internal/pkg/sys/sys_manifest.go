@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/gvallee/go_exec/pkg/advexec"
-	"github.com/gvallee/validation_tool/internal/pkg/manifest"
+	"github.com/gvallee/go_exec/pkg/manifest"
 )
 
 func createManifestForCmdOutput(dir string, cmdBin string, args []string) error {

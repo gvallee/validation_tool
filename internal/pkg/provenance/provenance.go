@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gvallee/validation_tool/internal/pkg/manifest"
+	"github.com/gvallee/go_exec/pkg/manifest"
 	"github.com/gvallee/validation_tool/internal/pkg/sys"
 	"github.com/gvallee/validation_tool/pkg/syblockchainfs"
 )
