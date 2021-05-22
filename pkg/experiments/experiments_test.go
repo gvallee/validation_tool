@@ -20,7 +20,8 @@ import (
 var partition = flag.String("partition", "", "Name of Slurm partition to use to run the test")
 var modules = flag.String("modules", "", "Comma-separated list of modules to use to run the test")
 var runDir = flag.String("run-dir", "", "From where the test needs to be executed")
-var mpiInstallDir = flag.String("mpi-dir", "", "MPI install directory to use to execute the test")
+
+//var mpiInstallDir = flag.String("mpi-dir", "", "MPI install directory to use to execute the test")
 
 func setExperiment(t *testing.T) *Experiment {
 	var err error
@@ -55,10 +56,12 @@ func TestRunSingle(t *testing.T) {
 
 	e := setExperiment(t)
 	e.MPICfg = new(MPIConfig)
-	e.MPICfg.BuildEnv.InstallDir = *mpiInstallDir
-	if !util.PathExists(e.MPICfg.BuildEnv.InstallDir) {
-		t.Fatalf("%s does not exist", e.MPICfg.BuildEnv.InstallDir)
-	}
+	/*
+		e.MPICfg.BuildEnv.InstallDir = *mpiInstallDir
+		if !util.PathExists(e.MPICfg.BuildEnv.InstallDir) {
+			t.Fatalf("%s does not exist", e.MPICfg.BuildEnv.InstallDir)
+		}
+	*/
 	err := e.Run(r)
 	if err != nil {
 		t.Fatalf("experiment failed: %s", err)
@@ -71,6 +74,7 @@ func TestRunSingle(t *testing.T) {
 /*
 func TestRunMany(t *testing.T) {
 	r := newRuntime()
+	r.maxRunningJobs = 2
 
 	e := setExperiment(t)
 	exps := new(Experiments)
@@ -84,9 +88,11 @@ func TestRunMany(t *testing.T) {
 		exps.List = append(exps.List, e)
 	}
 
-	pass := exps.Run(r)
-	if !pass {
-		t.Fatalf("unable to run experiments")
+	err := exps.Run(r)
+	if err != nil {
+		t.Fatalf("unable to submit experiments")
 	}
+
+	exps.Wait()
 }
 */

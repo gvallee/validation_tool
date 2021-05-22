@@ -436,12 +436,6 @@ func (e *Experiment) Wait() {
 	}
 
 	for e.Result == nil {
-		/*
-			if e.runtime != nil && len(e.runtime.runningExperiments) > 0 {
-				// Check for completion
-				e.runtime.checkCompletions()
-			}
-		*/
 		time.Sleep(1 * time.Second)
 		s := e.getStatus()
 		if s == jm.StatusDone || s == jm.StatusStop {
