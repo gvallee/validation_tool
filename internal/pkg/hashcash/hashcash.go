@@ -42,7 +42,7 @@ func (s *Stamp) AddManifest(path string) error {
 
 	// Add the hash of the file to ext
 	name := filepath.Base(path)
-	name = strings.TrimRight(name, ".MANIFEST")
+	name = strings.TrimSuffix(name, ".MANIFEST")
 	hash := hash.HashFile(path)
 	extStr := name + "=" + hash
 	if s.ext == "" {
