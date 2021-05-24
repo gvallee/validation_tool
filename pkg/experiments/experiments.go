@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,9 +22,11 @@ import (
 	"github.com/gvallee/go_hpc_jobmgr/pkg/job"
 	"github.com/gvallee/go_hpc_jobmgr/pkg/launcher"
 	"github.com/gvallee/go_hpc_jobmgr/pkg/mpi"
+	"github.com/gvallee/go_hpc_jobmgr/pkg/sys"
 	"github.com/gvallee/go_software_build/pkg/app"
 	"github.com/gvallee/go_software_build/pkg/buildenv"
 	"github.com/gvallee/go_software_build/pkg/builder"
+	"github.com/gvallee/go_util/pkg/util"
 	"github.com/gvallee/validation_tool/pkg/platform"
 )
 
@@ -36,8 +39,9 @@ type MPIConfig struct {
 }
 
 type ExperimentResult struct {
-	Res     results.Result
-	ExecRes advexec.Result
+	Res               results.Result
+	ExecRes           advexec.Result
+	PostRunUpdateDone bool
 }
 
 type Experiment struct {
@@ -77,6 +81,8 @@ type Experiment struct {
 	jobMgr *jm.JM
 
 	runtime *Runtime
+
+	sysCfg *sys.Config
 }
 
 type Experiments struct {
@@ -115,7 +121,11 @@ type Runtime struct {
 	maxRunningJobs int
 
 	Started bool
+
+	sleepBeforeSubmittingAgain time.Duration
 }
+
+const jobLogFilename = "jobs.log"
 
 /*
 func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
@@ -133,17 +143,37 @@ func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
 }
 */
 
-func newRuntime() *Runtime {
+func addJobsToLog(dir string, jobInfo *job.Job) error {
+	content := fmt.Sprintf("%d %s %s\n", jobInfo.ID, jobInfo.Name, jobInfo.BatchScript)
+	jobLogFile := filepath.Join(dir, jobLogFilename)
+
+	if util.FileExists(jobLogFile) {
+		data, err := ioutil.ReadFile(jobLogFile)
+		if err != nil {
+			return err
+		}
+		content += string(data)
+	}
+
+	err := ioutil.WriteFile(jobLogFile, []byte(content), 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewRuntime() *Runtime {
 	r := new(Runtime)
 	r.wg = new(sync.WaitGroup)
 	r.wg.Add(1)
 	r.count = 0
 	r.maxRunningJobs = 1
+	r.sleepBeforeSubmittingAgain = 10
 	return r
 }
 
+/*
 func processOutput(execRes *advexec.Result, expRes *results.Result, appInfo *app.Info) error {
-	/*
 		var err error
 
 		expRes.Note, err = postExecutionDataMgt(sysCfg, execRes.Stdout)
@@ -158,10 +188,10 @@ func processOutput(execRes *advexec.Result, expRes *results.Result, appInfo *app
 		}
 
 		log.Println("NOTE: ", expRes.Note)
-	*/
 
 	return nil
 }
+*/
 
 func (r *Runtime) triggerExperiment() error {
 	var expMPICfg mpi.Config
@@ -189,6 +219,7 @@ func (r *Runtime) triggerExperiment() error {
 		goto ExpCompleted
 	}
 	e.jobMgr = &jobMgr
+	e.sysCfg = &sysCfg
 
 	if e.Env != nil {
 		b.Env.ScratchDir = e.Env.ScratchDir
@@ -262,6 +293,7 @@ func (r *Runtime) triggerExperiment() error {
 		e.job.Name = e.App.Name
 	}
 	e.job.RunDir = e.RunDir
+	e.job.NonBlocking = true
 	if e.LaunchScript != "" {
 		e.job.BatchScript = e.LaunchScript
 	}
@@ -271,35 +303,32 @@ func (r *Runtime) triggerExperiment() error {
 
 	fmt.Printf("Launching experiment %d\n", e.id)
 	e.Result.Res, e.Result.ExecRes = launcher.Run(e.job, &expMPICfg, e.jobMgr, &sysCfg, nil)
-	/*
-		if !expRes.Pass {
-			return false, expRes, execRes
-		}
-	*/
-	if e.Result.ExecRes.Err != nil {
-		e.Result.ExecRes.Err = fmt.Errorf("failed to run experiment: %s", e.Result.ExecRes.Err)
-		/*
-			err = launcher.SaveErrorDetails(&exp.HostMPI, &myContainerMPICfg.Implem, sysCfg, &execRes)
-			if err != nil {
-				e.Result.ExecRes.Err = fmt.Errorf("failed to save error details: %s", err)
-			}
-		*/
-		e.Result.Res.Pass = false
-		goto ExpCompleted
-	}
-	log.Printf("* Successful run - Analysing data...")
-
-	err = processOutput(&e.Result.ExecRes, &e.Result.Res, e.App)
 	if err != nil {
-		e.Result.ExecRes.Err = fmt.Errorf("failed to process output: %s", err)
+		e.Result.ExecRes.Err = fmt.Errorf("failed to submit experiment: %s", e.Result.ExecRes.Err)
 		e.Result.Res.Pass = false
-		log.Printf("failed to process output: %s", err)
 		goto ExpCompleted
 	}
 
-	log.Println("-> Experiment successfully executed")
-	log.Printf("* Experiment's note: %s", e.Result.Res.Note)
-	log.Printf("* Experiment's output: %s", e.Result.ExecRes.Stdout)
+	err = addJobsToLog(e.RunDir, e.job)
+	if err != nil {
+		e.Result.ExecRes.Err = fmt.Errorf("failed to update job log: %s", err)
+		e.Result.Res.Pass = false
+		goto ExpCompleted
+	}
+
+	/*
+		err = processOutput(&e.Result.ExecRes, &e.Result.Res, e.App)
+		if err != nil {
+			e.Result.ExecRes.Err = fmt.Errorf("failed to process output: %s", err)
+			e.Result.Res.Pass = false
+			log.Printf("failed to process output: %s", err)
+			goto ExpCompleted
+		}
+
+		log.Println("-> Experiment successfully executed")
+		log.Printf("* Experiment's note: %s", e.Result.Res.Note)
+		log.Printf("* Experiment's output: %s", e.Result.ExecRes.Stdout)
+	*/
 
 	e.Result.Res.Pass = true
 
@@ -326,10 +355,26 @@ func (e *Experiment) getStatus() jm.JobStatus {
 	return status[0]
 }
 
+func (e *Experiment) postRunUpdate() error {
+	if e.jobMgr == nil || e.sysCfg == nil || e.Result == nil {
+		// The experiment is defined but not yet submitted
+		return fmt.Errorf("job has not completed yet")
+	}
+	if e.Result.PostRunUpdateDone {
+		// Already done
+		return nil
+	}
+	res := e.jobMgr.PostRun(&e.Result.ExecRes, e.job, e.sysCfg)
+	e.Result.ExecRes = res
+	e.Result.PostRunUpdateDone = true
+	return nil
+}
+
 func (r *Runtime) checkCompletions() {
 	for idx, e := range r.runningExperiments {
 		s := e.getStatus()
 		if s == jm.StatusDone || s == jm.StatusStop {
+			fmt.Printf("Experiment %d has completed\n", e.id)
 			r.runningExperiments = append(r.runningExperiments[:idx], r.runningExperiments[idx+1:]...)
 		}
 	}
@@ -338,12 +383,12 @@ func (r *Runtime) checkCompletions() {
 func (r *Runtime) serveJobQueue() error {
 	var err error
 
+	fmt.Printf("%d experiments are pending\n", len(r.pendingExperiments))
 	if len(r.pendingExperiments) > 0 {
 		if len(r.runningExperiments) < r.maxRunningJobs || r.maxRunningJobs == 0 {
 			err = r.triggerExperiment()
 			if err != nil {
 				fmt.Printf("Triggering event failed: %s", err)
-				os.Exit(69)
 				return err
 			}
 		}
@@ -351,6 +396,7 @@ func (r *Runtime) serveJobQueue() error {
 
 	if len(r.runningExperiments) > 0 {
 		// Check for completion
+		fmt.Printf("%d experiments are running\n", len(r.runningExperiments))
 		r.checkCompletions()
 	}
 	return nil
@@ -374,8 +420,7 @@ func (e *Experiment) Run(r *Runtime) error {
 	return nil
 }
 
-func (e *Experiments) Run(r *Runtime) bool {
-	validationStatus := true
+func (e *Experiments) Run(r *Runtime) error {
 	for _, exp := range e.List {
 		if e.App != nil && exp.App == nil {
 			exp.App = e.App
@@ -384,7 +429,6 @@ func (e *Experiments) Run(r *Runtime) bool {
 			exp.Env = e.Env
 		}
 		if e.Platform != nil && exp.Platform == nil {
-			fmt.Println("DBG: copying platform info")
 			exp.Platform = e.Platform
 		}
 		if len(e.RequiredModules) > 0 {
@@ -394,11 +438,11 @@ func (e *Experiments) Run(r *Runtime) bool {
 			exp.MPICfg = e.MPICfg
 		}
 		err := exp.Run(r)
-		if err != nil && validationStatus {
-			validationStatus = false
+		if err != nil {
+			return err
 		}
 	}
-	return validationStatus
+	return nil
 }
 
 func (r *Runtime) Start() {
@@ -414,7 +458,7 @@ func (r *Runtime) Start() {
 				}
 				if len(r.pendingExperiments) > 0 {
 					// Some jobs could be submitted right away, so we wait 10 minutes
-					time.Sleep(10 * time.Minute)
+					time.Sleep(r.sleepBeforeSubmittingAgain * time.Minute)
 				}
 			}
 			defer r.wg.Done()
@@ -422,6 +466,10 @@ func (r *Runtime) Start() {
 		}(r)
 	}
 	r.Started = true
+}
+
+func (r *Runtime) Fini() {
+	r.wg.Wait()
 }
 
 // Wait makes the current process wait for the termination of the webUI
@@ -439,7 +487,36 @@ func (e *Experiment) Wait() {
 		time.Sleep(1 * time.Second)
 		s := e.getStatus()
 		if s == jm.StatusDone || s == jm.StatusStop {
+			err := e.postRunUpdate()
+			if err != nil {
+				log.Printf("postRunUpdate() failed")
+				return
+			}
 			break
 		}
+	}
+}
+
+func (exps *Experiments) Wait(runtime *Runtime) {
+	completed := 0
+	for completed != len(exps.List) {
+		for _, e := range exps.List {
+			if e.Result != nil && !e.Result.PostRunUpdateDone {
+				eStatus := e.getStatus()
+				if eStatus == jm.StatusDone || eStatus == jm.StatusStop {
+					completed++
+					err := e.postRunUpdate()
+					if err != nil {
+						log.Printf("postRunUpdate() failed: %s", err)
+						return
+					}
+					// Exit early
+					if completed == len(exps.List) {
+						return
+					}
+				}
+			}
+		}
+		time.Sleep(1 * time.Minute)
 	}
 }

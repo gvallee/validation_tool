@@ -51,8 +51,9 @@ func setExperiment(t *testing.T) *Experiment {
 
 	return e
 }
+
 func TestRunSingle(t *testing.T) {
-	r := newRuntime()
+	r := NewRuntime()
 
 	e := setExperiment(t)
 	e.MPICfg = new(MPIConfig)
@@ -69,22 +70,19 @@ func TestRunSingle(t *testing.T) {
 	e.Wait()
 
 	fmt.Printf("Output: %s\n", e.Result.ExecRes.Stdout)
+	r.Fini()
 }
 
-/*
-func TestRunMany(t *testing.T) {
-	r := newRuntime()
-	r.maxRunningJobs = 2
+func TestRunExperiments(t *testing.T) {
+	r := NewRuntime()
+	r.sleepBeforeSubmittingAgain = 1
 
-	e := setExperiment(t)
 	exps := new(Experiments)
 	exps.MPICfg = new(MPIConfig)
-	exps.MPICfg.BuildEnv.InstallDir = *mpiInstallDir
-	if !util.PathExists(exps.MPICfg.BuildEnv.InstallDir) {
-		t.Fatalf("%s does not exist", exps.MPICfg.BuildEnv.InstallDir)
-	}
 
-	for i := 0; i < 10; i++ {
+	// We cannot queue too many job as a Go test as a 10 minutes timeout.
+	for i := 0; i < 4; i++ {
+		e := setExperiment(t)
 		exps.List = append(exps.List, e)
 	}
 
@@ -93,6 +91,6 @@ func TestRunMany(t *testing.T) {
 		t.Fatalf("unable to submit experiments")
 	}
 
-	exps.Wait()
+	exps.Wait(r)
+	r.Fini()
 }
-*/
