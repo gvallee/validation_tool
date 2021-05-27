@@ -118,7 +118,7 @@ type Runtime struct {
 
 	runningExperiments []*Experiment
 
-	maxRunningJobs int
+	MaxRunningJobs int
 
 	Started bool
 
@@ -167,7 +167,7 @@ func NewRuntime() *Runtime {
 	r.wg = new(sync.WaitGroup)
 	r.wg.Add(1)
 	r.count = 0
-	r.maxRunningJobs = 1
+	r.MaxRunningJobs = 1
 	r.SleepBeforeSubmittingAgain = 10
 	return r
 }
@@ -386,7 +386,7 @@ func (r *Runtime) serveJobQueue() error {
 
 	fmt.Printf("%d experiments are pending\n", len(r.pendingExperiments))
 	if len(r.pendingExperiments) > 0 {
-		if len(r.runningExperiments) < r.maxRunningJobs || r.maxRunningJobs == 0 {
+		if len(r.runningExperiments) < r.MaxRunningJobs || r.MaxRunningJobs == 0 {
 			err = r.triggerExperiment()
 			if err != nil {
 				fmt.Printf("Triggering event failed: %s", err)
