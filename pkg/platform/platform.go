@@ -7,6 +7,7 @@ package platform
 
 type Info struct {
 	Name        string
+	Device      string
 	MaxNumNodes int
 	MaxPPR      int
 }

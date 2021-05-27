@@ -122,7 +122,7 @@ type Runtime struct {
 
 	Started bool
 
-	sleepBeforeSubmittingAgain time.Duration
+	SleepBeforeSubmittingAgain time.Duration
 }
 
 const jobLogFilename = "jobs.log"
@@ -168,7 +168,7 @@ func NewRuntime() *Runtime {
 	r.wg.Add(1)
 	r.count = 0
 	r.maxRunningJobs = 1
-	r.sleepBeforeSubmittingAgain = 10
+	r.SleepBeforeSubmittingAgain = 10
 	return r
 }
 
@@ -284,6 +284,7 @@ func (r *Runtime) triggerExperiment() error {
 
 	if e.Platform != nil {
 		e.job.Partition = e.Platform.Name
+		e.job.Device = e.Platform.Device
 	}
 	if e.App != nil {
 		e.job.App.Name = e.App.BinName
@@ -458,7 +459,7 @@ func (r *Runtime) Start() {
 				}
 				if len(r.pendingExperiments) > 0 {
 					// Some jobs could be submitted right away, so we wait 10 minutes
-					time.Sleep(r.sleepBeforeSubmittingAgain * time.Minute)
+					time.Sleep(r.SleepBeforeSubmittingAgain * time.Minute)
 				}
 			}
 			defer r.wg.Done()

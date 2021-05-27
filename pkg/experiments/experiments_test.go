@@ -75,7 +75,7 @@ func TestRunSingle(t *testing.T) {
 
 func TestRunExperiments(t *testing.T) {
 	r := NewRuntime()
-	r.sleepBeforeSubmittingAgain = 1
+	r.SleepBeforeSubmittingAgain = 1
 
 	exps := new(Experiments)
 	exps.MPICfg = new(MPIConfig)
