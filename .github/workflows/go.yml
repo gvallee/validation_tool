@@ -27,7 +27,7 @@ jobs:
     - name: Build and test
       run: |
         mkdir -p $GOPATH
-        make test
+        go test ./...
       env:
         GOPATH: /tmp/go
 
