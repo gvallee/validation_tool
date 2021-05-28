@@ -204,7 +204,6 @@ func (r *Runtime) triggerExperiment() error {
 	e := r.pendingExperiments[0]
 	e.Result = new(ExperimentResult)
 
-	fmt.Printf("Triggering experiment %d\n", e.id)
 	b := new(builder.Builder)
 
 	if e.job == nil {
@@ -302,7 +301,7 @@ func (r *Runtime) triggerExperiment() error {
 		e.job.RequiredModules = e.RequiredModules
 	}
 
-	fmt.Printf("Launching experiment %d\n", e.id)
+	log.Printf("Launching experiment %d\n", e.id)
 	e.Result.Res, e.Result.ExecRes = launcher.Run(e.job, &expMPICfg, e.jobMgr, &sysCfg, nil)
 	if err != nil {
 		e.Result.ExecRes.Err = fmt.Errorf("failed to submit experiment: %s", e.Result.ExecRes.Err)
@@ -371,35 +370,59 @@ func (e *Experiment) postRunUpdate() error {
 	return nil
 }
 
-func (r *Runtime) checkCompletions() {
-	for idx, e := range r.runningExperiments {
-		s := e.getStatus()
-		if s == jm.StatusDone || s == jm.StatusStop {
-			fmt.Printf("Experiment %d has completed\n", e.id)
+func (r *Runtime) checkCompletions(idx int) {
+
+	if len(r.runningExperiments) < idx+1 {
+		return
+	}
+
+	s := r.runningExperiments[idx].getStatus()
+	if s == jm.StatusDone || s == jm.StatusStop {
+		log.Printf("Experiment %d has completed\n", r.runningExperiments[idx].id)
+		if idx == 0 {
+			r.runningExperiments = r.runningExperiments[1:]
+		} else {
 			r.runningExperiments = append(r.runningExperiments[:idx], r.runningExperiments[idx+1:]...)
 		}
+		r.checkCompletions(idx)
+		return
+	}
+
+	if idx+1 < len(r.runningExperiments) {
+		r.checkCompletions(idx + 1)
 	}
 }
 
-func (r *Runtime) serveJobQueue() error {
-	var err error
-
-	fmt.Printf("%d experiments are pending\n", len(r.pendingExperiments))
+func (r *Runtime) startExperiment() error {
 	if len(r.pendingExperiments) > 0 {
 		if len(r.runningExperiments) < r.MaxRunningJobs || r.MaxRunningJobs == 0 {
-			err = r.triggerExperiment()
+			err := r.triggerExperiment()
 			if err != nil {
-				fmt.Printf("Triggering event failed: %s", err)
+				log.Printf("Triggering event failed: %s", err)
 				return err
+			}
+			if len(r.pendingExperiments) > 0 && len(r.runningExperiments) < r.MaxRunningJobs {
+				err = r.serveJobQueue()
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
 
-	if len(r.runningExperiments) > 0 {
-		// Check for completion
-		fmt.Printf("%d experiments are running\n", len(r.runningExperiments))
-		r.checkCompletions()
+	return nil
+}
+
+func (r *Runtime) serveJobQueue() error {
+	log.Printf("%d experiments are pending\n", len(r.pendingExperiments))
+	err := r.startExperiment()
+	if err != nil {
+		return err
 	}
+
+	// Check for completion
+	log.Printf("%d experiments are running\n", len(r.runningExperiments))
+	r.checkCompletions(0)
 	return nil
 }
 
@@ -414,7 +437,6 @@ func (e *Experiment) Run(r *Runtime) error {
 		r.Start()
 	}
 	e.runtime = r
-
 	e.id = r.count
 	r.count++
 
@@ -438,6 +460,9 @@ func (e *Experiments) Run(r *Runtime) error {
 		if e.MPICfg != nil {
 			exp.MPICfg = e.MPICfg
 		}
+		if e.RunDir != "" {
+			exp.RunDir = e.RunDir
+		}
 		err := exp.Run(r)
 		if err != nil {
 			return err
@@ -454,7 +479,7 @@ func (r *Runtime) Start() {
 			for len(r.pendingExperiments) > 0 || len(r.runningExperiments) > 0 {
 				err := r.serveJobQueue()
 				if err != nil {
-					fmt.Printf("unable to run experiments: %s", err)
+					log.Printf("unable to run experiments: %s", err)
 					break
 				}
 				if len(r.pendingExperiments) > 0 {
@@ -480,7 +505,7 @@ func (r *Runtime) Wait() {
 
 func (e *Experiment) Wait() {
 	if e.runtime == nil {
-		fmt.Println("undefined runtime")
+		log.Println("undefined runtime")
 		return
 	}
 
