@@ -95,15 +95,12 @@ func (s *Stamp) Serialize() string {
 }
 
 func parseTime(t string) (time.Time, error) {
-	// The string we get as input looks like 2019-12-16T221815-Local which we need to transform into 2019-12-16T22:18:15-Local
-	newT := t[:13]
-	newT += ":"
-	newT += t[13:15]
-	newT += ":"
-	newT += t[15:22]
-
-	dateFormat := "yyyy-MM-ddTHHmmssZ"
-	return time.Parse(dateFormat, newT)
+	// We need a custom format and make sure there is no -Local or something similar at the end
+	idx := strings.LastIndex(t, "-")
+	newT := t[:idx]
+	const shortForm = "2006-01-02T150405"
+	metime, err := time.Parse(shortForm, newT)
+	return metime, err
 }
 
 func Parse(signature string) (Stamp, error) {
@@ -112,11 +109,13 @@ func Parse(signature string) (Stamp, error) {
 
 	tokens := strings.Split(signature, ":")
 	if len(tokens) != 7 {
+		log.Printf("Signature has %d elements instead of 7", len(tokens))
 		return s, HashCashWrongFormatErr
 	}
 	s.version = tokens[0]
 	s.bits, err = strconv.Atoi(tokens[1])
 	if err != nil {
+		log.Printf("unable to parse %s", tokens[1])
 		return s, HashCashWrongFormatErr
 	}
 	s.date, err = parseTime(tokens[2])

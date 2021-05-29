@@ -53,6 +53,10 @@ func setExperiment(t *testing.T) *Experiment {
 }
 
 func TestRunSingle(t *testing.T) {
+	if !util.PathExists(*runDir) {
+		t.Skip("run directory not specified, skipping")
+	}
+
 	r := NewRuntime()
 
 	e := setExperiment(t)
@@ -74,6 +78,10 @@ func TestRunSingle(t *testing.T) {
 }
 
 func TestRunExperiments(t *testing.T) {
+	if !util.PathExists(*runDir) {
+		t.Skip("run directory not specified, skipping")
+	}
+
 	r := NewRuntime()
 	r.SleepBeforeSubmittingAgain = 1
 
