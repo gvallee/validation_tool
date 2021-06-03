@@ -270,7 +270,11 @@ func (r *Runtime) triggerExperiment() error {
 	}
 
 	if e.MPICfg != nil {
-		expMPICfg.Implem.InstallDir = e.MPICfg.BuildEnv.InstallDir
+		if e.MPICfg.MPI.InstallDir != "" {
+			expMPICfg.Implem.InstallDir = e.MPICfg.MPI.InstallDir
+		} else {
+			expMPICfg.Implem.InstallDir = e.MPICfg.BuildEnv.InstallDir
+		}
 		expMPICfg.UserMpirunArgs = e.MpirunArgs // fixme: add the default args we get from config file
 		err = expMPICfg.Implem.Load()
 		if err != nil {
@@ -283,6 +287,8 @@ func (r *Runtime) triggerExperiment() error {
 
 	if e.Platform != nil {
 		e.job.Partition = e.Platform.Name
+		e.job.NNodes = e.Platform.MaxNumNodes
+		e.job.NP = e.Platform.MaxPPR * e.Platform.MaxNumNodes
 		e.job.Device = e.Platform.Device
 	}
 	if e.App != nil {
