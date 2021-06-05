@@ -7,11 +7,14 @@
 package experiments
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,6 +86,12 @@ type Experiment struct {
 	runtime *Runtime
 
 	sysCfg *sys.Config
+
+	// NumResults is the number of required results for the experiment
+	NumResults int
+
+	// hash represents the experiment so we have a unique and easy way to track experiments
+	hash string
 }
 
 type Experiments struct {
@@ -107,6 +116,9 @@ type Experiments struct {
 
 	// RunDir is the directory from which the experiments needs to be executed
 	RunDir string
+
+	// NumResults is the number of required results for the experiments
+	NumResults int
 }
 
 type Runtime struct {
@@ -123,9 +135,26 @@ type Runtime struct {
 	Started bool
 
 	SleepBeforeSubmittingAgain time.Duration
+
+	ProgressFrequency time.Duration
+}
+
+type SubmittedJob struct {
+	ID     int
+	Name   string
+	Hash   string
+	Script string
+}
+
+type Info struct {
+	Name   string
+	Dir    string
+	Script string
 }
 
 const jobLogFilename = "jobs.log"
+
+var jobLogs = []string{"jobs.log", "test.log"}
 
 /*
 func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
@@ -143,9 +172,54 @@ func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
 }
 */
 
-func addJobsToLog(dir string, jobInfo *job.Job) error {
-	content := fmt.Sprintf("%d %s %s\n", jobInfo.ID, jobInfo.Name, jobInfo.BatchScript)
-	jobLogFile := filepath.Join(dir, jobLogFilename)
+func (e *Experiment) toHash() string {
+	if e.App == nil || e.Platform == nil {
+		return ""
+	}
+	hashText := []string{fmt.Sprintf("%d", e.id), e.App.Name, e.RunDir, e.LaunchScript, e.Platform.Name, e.Platform.Device, fmt.Sprintf("%d", e.Platform.MaxNumNodes), fmt.Sprintf("%d", e.Platform.MaxPPR)}
+	if e.MPICfg != nil {
+		hashText = append(hashText, e.MPICfg.MPI.ID)
+		hashText = append(hashText, e.MPICfg.MPI.Version)
+	}
+	hash := sha256.Sum256([]byte(strings.Join(hashText, "\n")))
+	return string(hash[:])
+}
+
+func parseJobLogFile(path string) ([]SubmittedJob, error) {
+	var jobList []SubmittedJob
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		tokens := strings.Split(line, " ")
+		if len(tokens) > 2 {
+			jobID, err := strconv.Atoi(tokens[1])
+			if err != nil {
+				return nil, err
+			}
+			var newJob = SubmittedJob{
+				ID:     jobID,
+				Hash:   tokens[0],
+				Name:   tokens[1],
+				Script: tokens[2],
+			}
+			jobList = append(jobList, newJob)
+		}
+	}
+	return jobList, nil
+}
+
+func (e *Experiment) addJobsToLog() error {
+	if e.hash == "" {
+		e.hash = e.toHash()
+		if e.hash == "" {
+			return fmt.Errorf("unable to get experiment's hash")
+		}
+	}
+	content := fmt.Sprintf("%s %d %s %s\n", e.hash, e.job.ID, e.job.Name, e.job.BatchScript)
+	jobLogFile := filepath.Join(e.RunDir, jobLogFilename)
 
 	if util.FileExists(jobLogFile) {
 		data, err := ioutil.ReadFile(jobLogFile)
@@ -165,10 +239,10 @@ func addJobsToLog(dir string, jobInfo *job.Job) error {
 func NewRuntime() *Runtime {
 	r := new(Runtime)
 	r.wg = new(sync.WaitGroup)
-	r.wg.Add(1)
 	r.count = 0
 	r.MaxRunningJobs = 1
 	r.SleepBeforeSubmittingAgain = 10
+	r.ProgressFrequency = 1
 	return r
 }
 
@@ -227,19 +301,23 @@ func (r *Runtime) triggerExperiment() error {
 		b.App.Name = e.App.Name
 		b.App.URL = e.App.URL
 
-		err := b.Load(true)
-		if err != nil {
-			e.Result.ExecRes.Err = fmt.Errorf("unable to load a builder: %s", err)
-			e.Result.Res.Pass = false
-			log.Printf("unable to load a builder: %s", err)
-			goto ExpCompleted
-		}
-		res := b.Install()
-		if res.Err != nil {
-			e.Result.ExecRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
-			e.Result.Res.Pass = false
-			log.Printf("unable to install the experiment software: %s", res.Err)
-			goto ExpCompleted
+		if !util.FileExists(b.App.BinPath) {
+			err := b.Load(true)
+			if err != nil {
+				e.Result.ExecRes.Err = fmt.Errorf("unable to load a builder: %s", err)
+				e.Result.Res.Pass = false
+				log.Printf("unable to load a builder: %s", err)
+				goto ExpCompleted
+			}
+			res := b.Install()
+			if res.Err != nil {
+				e.Result.ExecRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
+				e.Result.Res.Pass = false
+				log.Printf("unable to install the experiment software: %s", res.Err)
+				goto ExpCompleted
+			}
+		} else {
+			log.Printf("Application's binary already available, no need to build it")
 		}
 	} else {
 		log.Printf("no build environment defined, not trying to build application")
@@ -270,6 +348,13 @@ func (r *Runtime) triggerExperiment() error {
 	}
 
 	if e.MPICfg != nil {
+		if e.MPICfg.MPI == nil {
+			// if MPICfg is not nil, MPICfg.MPI should not be nil
+			e.Result.ExecRes.Err = fmt.Errorf("MPI configuration is invalid")
+			e.Result.Res.Pass = false
+			log.Printf("%s", e.Result.ExecRes.Err)
+			goto ExpCompleted
+		}
 		if e.MPICfg.MPI.InstallDir != "" {
 			expMPICfg.Implem.InstallDir = e.MPICfg.MPI.InstallDir
 		} else {
@@ -315,7 +400,7 @@ func (r *Runtime) triggerExperiment() error {
 		goto ExpCompleted
 	}
 
-	err = addJobsToLog(e.RunDir, e.job)
+	err = e.addJobsToLog()
 	if err != nil {
 		e.Result.ExecRes.Err = fmt.Errorf("failed to update job log: %s", err)
 		e.Result.Res.Pass = false
@@ -432,24 +517,97 @@ func (r *Runtime) serveJobQueue() error {
 	return nil
 }
 
+func getRunsFromLogFiles(dir string) ([]SubmittedJob, error) {
+	var jobs []SubmittedJob
+	var err error
+
+	jobsLogFile := filepath.Join(dir, jobLogs[0])
+	testLogFile := filepath.Join(dir, jobLogs[1])
+
+	if !util.PathExists(jobsLogFile) && !util.PathExists(testLogFile) {
+		// This is not an error, the log file does not exist because no jobs were submitted
+		return nil, nil
+	}
+
+	if util.FileExists(jobsLogFile) {
+		jobs, err = parseJobLogFile(jobsLogFile)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse job log file %s: %s", jobsLogFile, err)
+		}
+	}
+
+	if util.FileExists(testLogFile) {
+		if len(jobs) == 0 {
+			jobs, err = parseJobLogFile(testLogFile)
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse job log file %s: %s", testLogFile, err)
+			}
+		} else {
+			morejobs, err := parseJobLogFile(testLogFile)
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse job log file %s: %s", testLogFile, err)
+			}
+			jobs = append(jobs, morejobs...)
+		}
+	}
+
+	return jobs, nil
+}
+
+func (e *Experiment) getNumResults() int {
+	count := 0
+	pastJobs, err := getRunsFromLogFiles(e.RunDir)
+	if err != nil {
+		log.Printf("unable to parse log file: %s", err)
+		return -1
+	}
+	for _, j := range pastJobs {
+		if j.Hash == e.hash {
+			count++
+		}
+	}
+	return count
+}
+
 func (e *Experiment) Run(r *Runtime) error {
+	if r == nil {
+		return fmt.Errorf("runtime is undefined")
+	}
+
 	e.id = -1
 	if e.App == nil {
 		return fmt.Errorf("application is undefined")
 	}
 
-	r.pendingExperiments = append(r.pendingExperiments, e)
-	if !r.Started {
-		r.Start()
+	e.hash = e.toHash()
+	if e.hash == "" {
+		return fmt.Errorf("unable to get experiment's hash")
 	}
-	e.runtime = r
-	e.id = r.count
-	r.count++
+	// At the moment, we cannot know how many of that experiment is queued or currently running
+	// which is okay, we do not assume multiple runtimes handling the execution of the same
+	// experiment
+	nExistingResults := e.getNumResults()
+	if nExistingResults == -1 {
+		return fmt.Errorf("unable to get the number of existing results for experiment %d", e.id)
+	}
+
+	for i := nExistingResults; i < e.NumResults; i++ {
+		e.runtime = r
+		e.id = r.count
+		r.count++
+		r.pendingExperiments = append(r.pendingExperiments, e)
+		if !r.Started {
+			r.Start()
+		}
+	}
 
 	return nil
 }
 
 func (e *Experiments) Run(r *Runtime) error {
+	if r == nil {
+		return fmt.Errorf("runtime is nil")
+	}
 	for _, exp := range e.List {
 		if e.App != nil && exp.App == nil {
 			exp.App = e.App
@@ -468,7 +626,22 @@ func (e *Experiments) Run(r *Runtime) error {
 		}
 		if e.RunDir != "" {
 			exp.RunDir = e.RunDir
+			/*
+				// If RunDir is defined, we can track how many results we already have.
+				// Figure out how many runs are required to fullfill the number of requested results
+				jobs, err := getRunsFromLogFiles(exp.RunDir)
+				if err != nil {
+					fmt.Printf("runs.GetFromLogFiles() failed: %s\n", err)
+					os.Exit(1)
+				}
+			*/
 		}
+		// We always need at least one result
+		if e.NumResults == 0 {
+			e.NumResults = 1
+		}
+		exp.NumResults = e.NumResults
+
 		err := exp.Run(r)
 		if err != nil {
 			return err
@@ -481,6 +654,13 @@ func (r *Runtime) Start() {
 	if !r.Started {
 		// Start the go routine that handles the job queue
 		go func(r *Runtime) {
+			if r == nil {
+				log.Printf("runtime is nil")
+				return
+			}
+			r.wg.Add(1)
+
+			defer r.wg.Done()
 			// fixme: do this only if the runtime routine is not created yet
 			for len(r.pendingExperiments) > 0 || len(r.runningExperiments) > 0 {
 				err := r.serveJobQueue()
@@ -493,7 +673,6 @@ func (r *Runtime) Start() {
 					time.Sleep(r.SleepBeforeSubmittingAgain * time.Minute)
 				}
 			}
-			defer r.wg.Done()
 			r.Started = false
 		}(r)
 	}
@@ -501,6 +680,9 @@ func (r *Runtime) Start() {
 }
 
 func (r *Runtime) Fini() {
+	if r.wg == nil {
+		return
+	}
 	r.wg.Wait()
 }
 
@@ -516,7 +698,7 @@ func (e *Experiment) Wait() {
 	}
 
 	for e.Result == nil {
-		time.Sleep(1 * time.Second)
+		time.Sleep(e.runtime.ProgressFrequency * time.Minute)
 		s := e.getStatus()
 		if s == jm.StatusDone || s == jm.StatusStop {
 			err := e.postRunUpdate()
@@ -549,6 +731,6 @@ func (exps *Experiments) Wait(runtime *Runtime) {
 				}
 			}
 		}
-		time.Sleep(1 * time.Minute)
+		time.Sleep(runtime.ProgressFrequency * time.Minute)
 	}
 }
