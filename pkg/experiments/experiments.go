@@ -177,12 +177,14 @@ func (e *Experiment) toHash() string {
 		return ""
 	}
 	hashText := []string{fmt.Sprintf("%d", e.id), e.App.Name, e.RunDir, e.LaunchScript, e.Platform.Name, e.Platform.Device, fmt.Sprintf("%d", e.Platform.MaxNumNodes), fmt.Sprintf("%d", e.Platform.MaxPPR)}
+	hashText = append(hashText, e.MpirunArgs...)
 	if e.MPICfg != nil {
 		hashText = append(hashText, e.MPICfg.MPI.ID)
 		hashText = append(hashText, e.MPICfg.MPI.Version)
 	}
-	hash := sha256.Sum256([]byte(strings.Join(hashText, "\n")))
-	return string(hash[:])
+	hash := sha256.Sum224([]byte(strings.Join(hashText, "\n")))
+	// Sprintf ensures we get a string with standard characters that can be used in file names
+	return fmt.Sprintf("%x", hash)
 }
 
 func parseJobLogFile(path string) ([]SubmittedJob, error) {
@@ -209,6 +211,36 @@ func parseJobLogFile(path string) ([]SubmittedJob, error) {
 		}
 	}
 	return jobList, nil
+}
+
+func (e *Experiment) addManifest() error {
+	manifestFileName := "experiments.MANIFEST"
+	content := "*****************************"
+	content += e.hash + "\n" + strings.Join(e.MpirunArgs, " ") + "\n"
+	if e.Platform != nil {
+		content += e.Platform.Name + "\n"
+		content += e.Platform.Device + "\n"
+		content += fmt.Sprintf("%d\n", e.Platform.MaxNumNodes)
+		content += fmt.Sprintf("%d\n", e.Platform.MaxPPR)
+	}
+	if e.MPICfg != nil && e.MPICfg.MPI != nil {
+		content += e.MPICfg.MPI.ID + "\n" + e.MPICfg.MPI.Version + "\n" + e.MPICfg.BuildEnv.InstallDir + "\n"
+	}
+	manifestPath := filepath.Join(e.RunDir, manifestFileName)
+	if util.FileExists(manifestPath) {
+		data, err := ioutil.ReadFile(manifestPath)
+		if err != nil {
+			return err
+		}
+		content += string(data)
+	}
+
+	err := ioutil.WriteFile(manifestPath, []byte(content), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (e *Experiment) addJobsToLog() error {
@@ -381,7 +413,7 @@ func (r *Runtime) triggerExperiment() error {
 		e.job.App.BinArgs = e.App.BinArgs
 		e.job.App.BinName = e.App.BinName
 		e.job.App.BinPath = e.App.BinPath
-		e.job.Name = e.App.Name
+		e.job.Name = e.hash
 	}
 	e.job.RunDir = e.RunDir
 	e.job.NonBlocking = true
@@ -595,6 +627,10 @@ func (e *Experiment) Run(r *Runtime) error {
 		e.runtime = r
 		e.id = r.count
 		r.count++
+		err := e.addManifest()
+		if err != nil {
+			return fmt.Errorf("unable to add experiment's manifest: %s", err)
+		}
 		r.pendingExperiments = append(r.pendingExperiments, e)
 		if !r.Started {
 			r.Start()
@@ -608,6 +644,8 @@ func (e *Experiments) Run(r *Runtime) error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
 	}
+
+	log.Printf("%d experiments to run", len(e.List))
 	for _, exp := range e.List {
 		if e.App != nil && exp.App == nil {
 			exp.App = e.App
