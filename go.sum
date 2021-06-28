@@ -1,11 +1,12 @@
-github.com/gvallee/go_exec v1.0.0/go.mod h1:s9fSkVniLYlQUZb99zuioVH45nkvnYxw6vmGEaZCUPk=
-github.com/gvallee/go_exec v1.0.1 h1:1Ib3Ti5M6tKTvB1Tybuy9+JHPl1DMnDptWwIqpis/xE=
 github.com/gvallee/go_exec v1.0.1/go.mod h1:s9fSkVniLYlQUZb99zuioVH45nkvnYxw6vmGEaZCUPk=
-github.com/gvallee/go_hpc_jobmgr v1.0.0 h1:EV7H1JLYB9dshzNawDLnUDN0aL//Mv0fz2N1lt+02/0=
-github.com/gvallee/go_hpc_jobmgr v1.0.0/go.mod h1:o3IzeKyEynyVJOq6dzWI2iAdUGe5/H4z61kvc0ihMF0=
+github.com/gvallee/go_exec v1.1.0 h1:3xhwLIcxY4VNGGPL5YZYxnWeTgLYU0PSOEMcO0gfi+Q=
+github.com/gvallee/go_exec v1.1.0/go.mod h1:s9fSkVniLYlQUZb99zuioVH45nkvnYxw6vmGEaZCUPk=
+github.com/gvallee/go_hpc_jobmgr v1.1.0 h1:4DQke/QiJRu3/2O5W19xNvcU1xwqelX3PoQN/ItgmjQ=
+github.com/gvallee/go_hpc_jobmgr v1.1.0/go.mod h1:gsikmgiQ+su5Cbaj48ErVtXyyTxXSiJf8r6CEUiN2wI=
 github.com/gvallee/go_software_build v1.0.0 h1:HnksQHnL/N2CtgkdzFLMHuqgKrUTfxGWL2GalvPdaG8=
 github.com/gvallee/go_software_build v1.0.0/go.mod h1:Wk1dQ3fx2ZYB7t6HF43zC5hRuLXnPZLzHeLkAxd/svo=
-github.com/gvallee/go_util v1.1.0 h1:qSwjCPTejJ8zbhFmpJ3WQtzpNOHWQwc4ijFsTbCJK7s=
 github.com/gvallee/go_util v1.1.0/go.mod h1:fTexpwdH/n05Ziu0TXJIQsr7E+46QpBxNdeOOsyC0/s=
+github.com/gvallee/go_util v1.5.0 h1:xxAQR2v6csFQdMX18dt9J0DATIUvkBV1zu2VW3yU3wo=
+github.com/gvallee/go_util v1.5.0/go.mod h1:rhmrHriih4is1E3KbQUyn+o8J6wrT6j2pLfAsugaJMY=
 github.com/gvallee/syserror v1.0.0 h1:c2gcrnxJolhe+daVBVPbTuGnXhOonZ8IqUMMwAhQASM=
 github.com/gvallee/syserror v1.0.0/go.mod h1:UtEvDMlsf6YpA29eU+JlpINYz/bLqfBEJ8wmpoJIzs4=

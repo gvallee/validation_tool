@@ -122,63 +122,137 @@ func TestGetNumResults(t *testing.T) {
 	e.RunDir = tempDir
 	e.App = new(app.Info)
 	e.App.Name = "test_app"
-	e.job = new(job.Job)
-	e.job.ID = 42
-	e.job.Name = "dummy_job"
-	e.job.BatchScript = "dummy_script"
-	e.job.Partition = "dummy_partition"
+	e.Job = new(job.Job)
+	e.Job.ID = 42
+	e.Job.Name = "dummy_job"
+	e.Job.BatchScript = "dummy_script"
+	e.Job.Partition = "dummy_partition"
 	e.MPICfg = new(MPIConfig)
 	e.MPICfg.MPI = new(implem.Info)
 	e.MPICfg.MPI.ID = "dummy_mpi"
 	e.MPICfg.MPI.Version = "1.0.0"
+	e.Platform = new(platform.Info)
+	e.Platform.Name = "dummy_platform"
 
-	e.hash = e.toHash()
+	e.Hash = e.toHash()
+	if e.Hash == "" {
+		t.Fatalf("unable to set experiment's hash")
+	}
 
 	// No job log file exists, we should get 0
-	n := e.getNumResults()
-	if n != 0 {
+	n, err := e.getNumResults()
+	if n != 0 || err != nil {
 		t.Fatalf("e.getNumResults() returned %d instead of 0", n)
 	}
 
 	// Create a job log file with a dummy entry
 	filePath := filepath.Join(tempDir, "jobs.log")
-	dummyHash := sha256.Sum256([]byte("dummy"))
+	dummyHashRaw := sha256.Sum256([]byte("dummy"))
+	dummyHash := fmt.Sprintf("%x", dummyHashRaw[:])
 	dummyJobID := 1
 	dummyJobName := "dummy"
 	dummyBatchScript := "dummy.sh"
-	content := fmt.Sprintf("%s %d %s %s\n", string(dummyHash[:]), dummyJobID, dummyJobName, dummyBatchScript)
+	content := fmt.Sprintf("%s %d %s %s\n", dummyHash, dummyJobID, dummyJobName, dummyBatchScript)
 	err = ioutil.WriteFile(filePath, []byte(content), 0777)
 	if err != nil {
 		t.Fatalf("unable to add dummy entry to job log: %s", err)
 	}
 
-	n = e.getNumResults()
-	if n != 0 {
-		t.Fatalf("e.getNumResults() returned %d instead of 0", n)
+	n, err = e.getNumResults()
+	if n != 0 || err != nil {
+		t.Fatalf("e.getNumResults() returned %d instead of 0 (err=%s)", n, err)
 	}
 
 	err = e.addJobsToLog()
 	if err != nil {
 		t.Fatalf("e.addJobsToLog() failed: %s", err)
 	}
+	// Create dummy output files so we can mimic successful runs
+	outputFile1 := filepath.Join(tempDir, e.Hash+"-dummy-20210615.out")
+	err = ioutil.WriteFile(outputFile1, []byte("something"), 0777)
+	if err != nil {
+		t.Fatalf("unable to create dummy output file: %s", err)
+	}
 
-	n = e.getNumResults()
-	if n != 1 {
-		t.Fatalf("e.getNumResults() returned %d instead of 1", n)
+	n, err = e.getNumResults()
+	if n != 1 || err != nil {
+		t.Fatalf("e.getNumResults() returned %d instead of 1 (err=%s)", n, err)
 	}
 
 	err = e.addJobsToLog()
 	if err != nil {
 		t.Fatalf("e.addJobsToLog() failed: %s", err)
 	}
+	outputFile2 := filepath.Join(tempDir, e.Hash+"-dummy-20210616.out")
+	err = ioutil.WriteFile(outputFile2, []byte("something else"), 0777)
+	if err != nil {
+		t.Fatalf("unable to create dummy output file: %s", err)
+	}
 
 	err = e.addJobsToLog()
 	if err != nil {
 		t.Fatalf("e.addJobsToLog() failed: %s", err)
 	}
+	outputFile3 := filepath.Join(tempDir, e.Hash+"-dummy-20210617.out")
+	err = ioutil.WriteFile(outputFile3, []byte("something else again"), 0777)
+	if err != nil {
+		t.Fatalf("unable to create dummy output file: %s", err)
+	}
 
-	n = e.getNumResults()
-	if n != 3 {
+	n, err = e.getNumResults()
+	if n != 3 || err != nil {
 		t.Fatalf("e.getNumResults() returned %d instead of 3", n)
 	}
+}
+
+func TestManifestParsing(t *testing.T) {
+	manifestContentExample := `*****************************
+	d80ff0e7d124a6da455adf051d6a743a067f0babbd538cf567d401fb
+	-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1
+	iris
+	
+	32
+	32
+	
+	
+	/home/toto/workspace/install/ompi
+	*****************************
+	5099182dacdc34761affd0f586a6e1481b747b4443f7882a90d12fe9
+	-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1 -x UCX_TLS=dc,knem,self
+	iris
+
+	32
+	32
+
+
+	/home/toto/workspace/install/ompi`
+
+	data, err := parseManifestContent(strings.Split(manifestContentExample, "\n"))
+	if err != nil {
+		t.Fatalf("parseManifestContent() failed: %s", err)
+	}
+
+	expectedHash := "d80ff0e7d124a6da455adf051d6a743a067f0babbd538cf567d401fb"
+	if _, ok := data[expectedHash]; !ok {
+		t.Fatalf("no entry for hash %s", expectedHash)
+	}
+	curHash := data[expectedHash].Hash
+	if curHash != expectedHash {
+		t.Fatalf("invalid hash: %s instead of %s", curHash, expectedHash)
+	}
+	curMpiArgs := "-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1"
+	if curMpiArgs != data[expectedHash].MpirunArgs {
+		t.Fatalf("invalid mpiruna arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
+	}
+
+	expectedHash = "5099182dacdc34761affd0f586a6e1481b747b4443f7882a90d12fe9"
+	curHash = data[expectedHash].Hash
+	if curHash != expectedHash {
+		t.Fatalf("invalid hash: %s instead of %s", curHash, expectedHash)
+	}
+	curMpiArgs = "-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1 -x UCX_TLS=dc,knem,self"
+	if curMpiArgs != data[expectedHash].MpirunArgs {
+		t.Fatalf("invalid mpiruna arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
+	}
+
 }

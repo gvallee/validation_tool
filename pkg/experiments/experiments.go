@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/gvallee/go_software_build/pkg/builder"
 	"github.com/gvallee/go_util/pkg/util"
 	"github.com/gvallee/validation_tool/pkg/platform"
+	expresults "github.com/gvallee/validation_tool/pkg/results"
 )
 
 type MPIConfig struct {
@@ -77,8 +79,8 @@ type Experiment struct {
 
 	MPICfg *MPIConfig
 
-	// job is the job associated to the experiment (ATM the moment, only one at a time)
-	job *job.Job
+	// Job is the job associated to the experiment (ATM the moment, only one at a time)
+	Job *job.Job
 
 	// jobmgr used for the execution of the experiment
 	jobMgr *jm.JM
@@ -90,8 +92,12 @@ type Experiment struct {
 	// NumResults is the number of required results for the experiment
 	NumResults int
 
-	// hash represents the experiment so we have a unique and easy way to track experiments
-	hash string
+	// Hash represents the experiment so we have a unique and easy way to track experiments
+	Hash string
+
+	MaxExecTime string
+
+	ResultsDir string
 }
 
 type Experiments struct {
@@ -119,6 +125,10 @@ type Experiments struct {
 
 	// NumResults is the number of required results for the experiments
 	NumResults int
+
+	MaxExecTime string
+
+	ResultsDir string
 }
 
 type Runtime struct {
@@ -137,11 +147,12 @@ type Runtime struct {
 	SleepBeforeSubmittingAgain time.Duration
 
 	ProgressFrequency time.Duration
+
+	lastExperiment *Experiment
 }
 
 type SubmittedJob struct {
 	ID     int
-	Name   string
 	Hash   string
 	Script string
 }
@@ -152,7 +163,17 @@ type Info struct {
 	Script string
 }
 
-const jobLogFilename = "jobs.log"
+type ManifestData struct {
+	Label      string
+	Hash       string
+	MpirunArgs string
+}
+
+const (
+	jobLogFilename    = "jobs.log"
+	manifestFileName  = "experiments.MANIFEST"
+	manifestDelimitor = "*****************************"
+)
 
 var jobLogs = []string{"jobs.log", "test.log"}
 
@@ -172,19 +193,28 @@ func postExecutionDataMgt(sysCfg *sys.Config, output string) (string, error) {
 }
 */
 
+func ToHash(hashText string) string {
+	hash := sha256.Sum224([]byte(hashText))
+	// Sprintf ensures we get a string with standard characters that can be used in file names
+	return fmt.Sprintf("%x", hash)
+}
+
 func (e *Experiment) toHash() string {
-	if e.App == nil || e.Platform == nil {
+	if e.Platform == nil {
 		return ""
 	}
-	hashText := []string{fmt.Sprintf("%d", e.id), e.App.Name, e.RunDir, e.LaunchScript, e.Platform.Name, e.Platform.Device, fmt.Sprintf("%d", e.Platform.MaxNumNodes), fmt.Sprintf("%d", e.Platform.MaxPPR)}
+	var hashText []string
+
+	if e.App != nil {
+		hashText = append(hashText, e.App.Name)
+	}
+	hashText = append(hashText, []string{e.RunDir, e.LaunchScript, e.Platform.Name, e.Platform.Device, fmt.Sprintf("%d", e.Platform.MaxNumNodes), fmt.Sprintf("%d", e.Platform.MaxPPR)}...)
 	hashText = append(hashText, e.MpirunArgs...)
 	if e.MPICfg != nil {
 		hashText = append(hashText, e.MPICfg.MPI.ID)
 		hashText = append(hashText, e.MPICfg.MPI.Version)
 	}
-	hash := sha256.Sum224([]byte(strings.Join(hashText, "\n")))
-	// Sprintf ensures we get a string with standard characters that can be used in file names
-	return fmt.Sprintf("%x", hash)
+	return ToHash(strings.Join(hashText, "\n"))
 }
 
 func parseJobLogFile(path string) ([]SubmittedJob, error) {
@@ -204,8 +234,7 @@ func parseJobLogFile(path string) ([]SubmittedJob, error) {
 			var newJob = SubmittedJob{
 				ID:     jobID,
 				Hash:   tokens[0],
-				Name:   tokens[1],
-				Script: tokens[2],
+				Script: tokens[1],
 			}
 			jobList = append(jobList, newJob)
 		}
@@ -213,10 +242,44 @@ func parseJobLogFile(path string) ([]SubmittedJob, error) {
 	return jobList, nil
 }
 
+func parseManifestContent(lines []string) (map[string]*ManifestData, error) {
+	data := make(map[string]*ManifestData)
+	idx := 0
+	for idx < len(lines) {
+		line := strings.TrimLeft(lines[idx], " \t")
+		if line == manifestDelimitor {
+			idx++
+			hash := strings.TrimLeft(lines[idx], " \t")
+			data[hash] = new(ManifestData)
+			data[hash].Hash = hash
+			idx++
+			data[hash].MpirunArgs = strings.TrimLeft(lines[idx], " \t")
+		} else {
+			idx++
+		}
+
+	}
+	return data, nil
+}
+
+func ParseManifestFile(dir string) (map[string]*ManifestData, error) {
+	filePath := filepath.Join(dir, manifestFileName)
+	if !util.FileExists(filePath) {
+		return nil, fmt.Errorf("manifest file %s does not exist", filePath)
+	}
+
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	return parseManifestContent(lines)
+}
+
 func (e *Experiment) addManifest() error {
-	manifestFileName := "experiments.MANIFEST"
-	content := "*****************************"
-	content += e.hash + "\n" + strings.Join(e.MpirunArgs, " ") + "\n"
+	content := manifestDelimitor + "\n"
+	content += e.Hash + "\n" + strings.Join(e.MpirunArgs, " ") + "\n"
 	if e.Platform != nil {
 		content += e.Platform.Name + "\n"
 		content += e.Platform.Device + "\n"
@@ -226,7 +289,7 @@ func (e *Experiment) addManifest() error {
 	if e.MPICfg != nil && e.MPICfg.MPI != nil {
 		content += e.MPICfg.MPI.ID + "\n" + e.MPICfg.MPI.Version + "\n" + e.MPICfg.BuildEnv.InstallDir + "\n"
 	}
-	manifestPath := filepath.Join(e.RunDir, manifestFileName)
+	manifestPath := filepath.Join(e.ResultsDir, manifestFileName)
 	if util.FileExists(manifestPath) {
 		data, err := ioutil.ReadFile(manifestPath)
 		if err != nil {
@@ -244,14 +307,14 @@ func (e *Experiment) addManifest() error {
 }
 
 func (e *Experiment) addJobsToLog() error {
-	if e.hash == "" {
-		e.hash = e.toHash()
-		if e.hash == "" {
-			return fmt.Errorf("unable to get experiment's hash")
+	if e.Hash == "" {
+		e.Hash = e.toHash()
+		if e.Hash == "" {
+			return fmt.Errorf("addJobsToLog() - unable to get experiment's hash")
 		}
 	}
-	content := fmt.Sprintf("%s %d %s %s\n", e.hash, e.job.ID, e.job.Name, e.job.BatchScript)
-	jobLogFile := filepath.Join(e.RunDir, jobLogFilename)
+	content := fmt.Sprintf("%s %d %s\n", e.Hash, e.Job.ID, e.Job.BatchScript)
+	jobLogFile := filepath.Join(e.ResultsDir, jobLogFilename)
 
 	if util.FileExists(jobLogFile) {
 		data, err := ioutil.ReadFile(jobLogFile)
@@ -312,8 +375,33 @@ func (r *Runtime) triggerExperiment() error {
 
 	b := new(builder.Builder)
 
-	if e.job == nil {
-		e.job = new(job.Job)
+	if e.Job == nil {
+		e.Job = new(job.Job)
+		e.Job.MaxExecTime = e.MaxExecTime
+
+		if e.Env != nil && e.Env.InstallDir != "" {
+			newPath := ""
+			newLDPath := ""
+			installDirs, err := ioutil.ReadDir(e.Env.InstallDir)
+			if err != nil {
+				return err
+			}
+			for _, d := range installDirs {
+				binDir := filepath.Join(e.Env.InstallDir, d.Name(), "bin")
+				if util.PathExists(binDir) {
+					newPath += binDir + ":"
+				}
+				libDir := filepath.Join(e.Env.InstallDir, d.Name(), "lib")
+				if util.PathExists(libDir) {
+					newLDPath += libDir + ":"
+				}
+			}
+			if e.Job.CustomEnv == nil {
+				e.Job.CustomEnv = make(map[string]string)
+				e.Job.CustomEnv["PATH"] = newPath + "$PATH"
+				e.Job.CustomEnv["LD_LIBRARY_PATH"] = newLDPath + "$LD_LIBRARY_PATH"
+			}
+		}
 	}
 
 	sysCfg, jobMgr, err := launcher.Load()
@@ -330,26 +418,31 @@ func (r *Runtime) triggerExperiment() error {
 		b.Env.ScratchDir = e.Env.ScratchDir
 		b.Env.InstallDir = e.Env.InstallDir
 		b.Env.BuildDir = e.Env.BuildDir
-		b.App.Name = e.App.Name
-		b.App.URL = e.App.URL
+		if e.App != nil {
+			b.App.Name = e.App.Name
+			b.App.URL = e.App.URL
+			b.App.BinPath = e.App.BinPath
 
-		if !util.FileExists(b.App.BinPath) {
-			err := b.Load(true)
-			if err != nil {
-				e.Result.ExecRes.Err = fmt.Errorf("unable to load a builder: %s", err)
-				e.Result.Res.Pass = false
-				log.Printf("unable to load a builder: %s", err)
-				goto ExpCompleted
-			}
-			res := b.Install()
-			if res.Err != nil {
-				e.Result.ExecRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
-				e.Result.Res.Pass = false
-				log.Printf("unable to install the experiment software: %s", res.Err)
-				goto ExpCompleted
+			if !util.FileExists(b.App.BinPath) {
+				err := b.Load(true)
+				if err != nil {
+					e.Result.ExecRes.Err = fmt.Errorf("unable to load a builder to prepare %s: %s", b.App.BinPath, err)
+					e.Result.Res.Pass = false
+					log.Printf("unable to load a builder: %s", err)
+					goto ExpCompleted
+				}
+				res := b.Install()
+				if res.Err != nil {
+					e.Result.ExecRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
+					e.Result.Res.Pass = false
+					log.Printf("unable to install the experiment software: %s", res.Err)
+					goto ExpCompleted
+				}
+			} else {
+				log.Printf("Application's binary already available, no need to build it")
 			}
 		} else {
-			log.Printf("Application's binary already available, no need to build it")
+			log.Printf("No app defined, relying on launch script, nothing to do")
 		}
 	} else {
 		log.Printf("no build environment defined, not trying to build application")
@@ -379,7 +472,9 @@ func (r *Runtime) triggerExperiment() error {
 		e.RunDir = sysCfg.ScratchDir
 	}
 
-	if e.MPICfg != nil {
+	// If the experiment is to be launched via a script, we do not know to get details
+	// about the MPI to use, we assume the script is self-contained
+	if e.MPICfg != nil && e.LaunchScript == "" {
 		if e.MPICfg.MPI == nil {
 			// if MPICfg is not nil, MPICfg.MPI should not be nil
 			e.Result.ExecRes.Err = fmt.Errorf("MPI configuration is invalid")
@@ -403,34 +498,35 @@ func (r *Runtime) triggerExperiment() error {
 	}
 
 	if e.Platform != nil {
-		e.job.Partition = e.Platform.Name
-		e.job.NNodes = e.Platform.MaxNumNodes
-		e.job.NP = e.Platform.MaxPPR * e.Platform.MaxNumNodes
-		e.job.Device = e.Platform.Device
+		e.Job.Partition = e.Platform.Name
+		e.Job.NNodes = e.Platform.MaxNumNodes
+		e.Job.NP = e.Platform.MaxPPR * e.Platform.MaxNumNodes
+		e.Job.Device = e.Platform.Device
 	}
 	if e.App != nil {
-		e.job.App.Name = e.App.BinName
-		e.job.App.BinArgs = e.App.BinArgs
-		e.job.App.BinName = e.App.BinName
-		e.job.App.BinPath = e.App.BinPath
-		e.job.Name = e.hash
+		e.Job.App.Name = e.App.BinName
+		e.Job.App.BinArgs = e.App.BinArgs
+		e.Job.App.BinName = e.App.BinName
+		e.Job.App.BinPath = e.App.BinPath
+		e.Job.Name = e.Hash
 	}
-	e.job.RunDir = e.RunDir
-	e.job.NonBlocking = true
+	e.Job.RunDir = e.RunDir
+	e.Job.NonBlocking = true
 	if e.LaunchScript != "" {
-		e.job.BatchScript = e.LaunchScript
+		e.Job.BatchScript = e.LaunchScript
 	}
 	if len(e.RequiredModules) > 0 {
-		e.job.RequiredModules = e.RequiredModules
+		e.Job.RequiredModules = e.RequiredModules
 	}
 
 	log.Printf("Launching experiment %d\n", e.id)
-	e.Result.Res, e.Result.ExecRes = launcher.Run(e.job, &expMPICfg, e.jobMgr, &sysCfg, nil)
+	e.Result.Res, e.Result.ExecRes = launcher.Run(e.Job, &expMPICfg, e.jobMgr, &sysCfg, nil)
 	if err != nil {
 		e.Result.ExecRes.Err = fmt.Errorf("failed to submit experiment: %s", e.Result.ExecRes.Err)
 		e.Result.Res.Pass = false
 		goto ExpCompleted
 	}
+	r.lastExperiment = e
 
 	err = e.addJobsToLog()
 	if err != nil {
@@ -468,7 +564,7 @@ func (e *Experiment) getStatus() jm.JobStatus {
 		// The experiment is defined but not yet submitted
 		return jm.StatusPending
 	}
-	status, err := e.jobMgr.JobStatus([]int{e.job.ID})
+	status, err := e.jobMgr.JobStatus([]int{e.Job.ID})
 	if err != nil {
 		return jm.StatusUnknown
 	}
@@ -487,7 +583,7 @@ func (e *Experiment) postRunUpdate() error {
 		// Already done
 		return nil
 	}
-	res := e.jobMgr.PostRun(&e.Result.ExecRes, e.job, e.sysCfg)
+	res := e.jobMgr.PostRun(&e.Result.ExecRes, e.Job, e.sysCfg)
 	e.Result.ExecRes = res
 	e.Result.PostRunUpdateDone = true
 	return nil
@@ -501,7 +597,7 @@ func (r *Runtime) checkCompletions(idx int) {
 
 	s := r.runningExperiments[idx].getStatus()
 	if s == jm.StatusDone || s == jm.StatusStop {
-		log.Printf("Experiment %d has completed\n", r.runningExperiments[idx].id)
+		log.Printf("Experiment %d has completed; %d pending, %d running\n", r.runningExperiments[idx].id, len(r.pendingExperiments), len(r.runningExperiments))
 		if idx == 0 {
 			r.runningExperiments = r.runningExperiments[1:]
 		} else {
@@ -549,7 +645,7 @@ func (r *Runtime) serveJobQueue() error {
 	return nil
 }
 
-func getRunsFromLogFiles(dir string) ([]SubmittedJob, error) {
+func GetRunsFromLogFiles(dir string) ([]SubmittedJob, error) {
 	var jobs []SubmittedJob
 	var err error
 
@@ -586,19 +682,48 @@ func getRunsFromLogFiles(dir string) ([]SubmittedJob, error) {
 	return jobs, nil
 }
 
-func (e *Experiment) getNumResults() int {
+func (e *Experiment) getNumResults() (int, error) {
 	count := 0
-	pastJobs, err := getRunsFromLogFiles(e.RunDir)
+	resultFiles, err := expresults.GetFiles(e.ResultsDir)
 	if err != nil {
-		log.Printf("unable to parse log file: %s", err)
-		return -1
+		return -1, err
 	}
-	for _, j := range pastJobs {
-		if j.Hash == e.hash {
+
+	for _, successfulResultFile := range resultFiles.SuccessfulExperiments {
+		filename := path.Base(successfulResultFile)
+		h, err := GetHashFromFileName(filename)
+		if err != nil {
+			// If the file name does not contain a hash, we check if it is because we
+			// only got a slurm output file.
+			if strings.HasPrefix(filename, "slurm-") {
+				// In some configuration, we just get a Slurm output file. In that case, we
+				// need to job ID from the filename and then look up that job to get the has
+				jobIDStr := strings.TrimPrefix(filename, "slurm-")
+				jobIDStr = strings.TrimSuffix(jobIDStr, ".out")
+				jobID, err := strconv.Atoi(jobIDStr)
+				if err != nil {
+					return -1, err
+				}
+				jobs, err := GetRunsFromLogFiles(e.ResultsDir)
+				if err != nil {
+					return -1, err
+				}
+				for _, j := range jobs {
+					if j.ID == jobID {
+						h = j.Hash
+						break
+					}
+				}
+			} else {
+				return -1, fmt.Errorf("unable to get hash from %s: %w", successfulResultFile, err)
+			}
+		}
+		if h == e.Hash {
 			count++
 		}
 	}
-	return count
+
+	return count, nil
 }
 
 func (e *Experiment) Run(r *Runtime) error {
@@ -607,20 +732,39 @@ func (e *Experiment) Run(r *Runtime) error {
 	}
 
 	e.id = -1
-	if e.App == nil {
-		return fmt.Errorf("application is undefined")
+	if e.App == nil && e.LaunchScript == "" {
+		return fmt.Errorf("application and batch script are undefined")
 	}
 
-	e.hash = e.toHash()
-	if e.hash == "" {
-		return fmt.Errorf("unable to get experiment's hash")
+	// The caller may have already set the hash, e.g., when the calling code
+	// generates the batch script, in which case we really do not want to
+	// overwrite it
+	if e.Hash == "" {
+		e.Hash = e.toHash()
+	}
+	if e.Hash == "" {
+		return fmt.Errorf("e.Run() - unable to get experiment's hash")
 	}
 	// At the moment, we cannot know how many of that experiment is queued or currently running
 	// which is okay, we do not assume multiple runtimes handling the execution of the same
 	// experiment
-	nExistingResults := e.getNumResults()
+	if e.ResultsDir == "" {
+		e.ResultsDir = e.RunDir
+	}
+	nExistingResults, err := e.getNumResults()
+	if err != nil {
+		return err
+	}
 	if nExistingResults == -1 {
 		return fmt.Errorf("unable to get the number of existing results for experiment %d", e.id)
+	}
+
+	if nExistingResults > 0 {
+		log.Printf("We already have %d out of %d results for experiment %s", nExistingResults, e.NumResults, e.Hash)
+	}
+
+	if nExistingResults >= e.NumResults {
+		log.Printf("We already have all the required results")
 	}
 
 	for i := nExistingResults; i < e.NumResults; i++ {
@@ -662,23 +806,18 @@ func (e *Experiments) Run(r *Runtime) error {
 		if e.MPICfg != nil {
 			exp.MPICfg = e.MPICfg
 		}
+		if e.ResultsDir != "" {
+			exp.ResultsDir = e.ResultsDir
+		}
 		if e.RunDir != "" {
 			exp.RunDir = e.RunDir
-			/*
-				// If RunDir is defined, we can track how many results we already have.
-				// Figure out how many runs are required to fullfill the number of requested results
-				jobs, err := getRunsFromLogFiles(exp.RunDir)
-				if err != nil {
-					fmt.Printf("runs.GetFromLogFiles() failed: %s\n", err)
-					os.Exit(1)
-				}
-			*/
 		}
 		// We always need at least one result
 		if e.NumResults == 0 {
 			e.NumResults = 1
 		}
 		exp.NumResults = e.NumResults
+		exp.MaxExecTime = e.MaxExecTime
 
 		err := exp.Run(r)
 		if err != nil {
@@ -696,9 +835,11 @@ func (r *Runtime) Start() {
 				log.Printf("runtime is nil")
 				return
 			}
+			fmt.Printf("runtime: adding 1 to work group")
 			r.wg.Add(1)
-
 			defer r.wg.Done()
+			r.Started = true
+
 			// fixme: do this only if the runtime routine is not created yet
 			for len(r.pendingExperiments) > 0 || len(r.runningExperiments) > 0 {
 				err := r.serveJobQueue()
@@ -706,15 +847,14 @@ func (r *Runtime) Start() {
 					log.Printf("unable to run experiments: %s", err)
 					break
 				}
-				if len(r.pendingExperiments) > 0 {
-					// Some jobs could be submitted right away, so we wait 10 minutes
-					time.Sleep(r.SleepBeforeSubmittingAgain * time.Minute)
-				}
+				// Some jobs could be submitted right away, so we wait 10 minutes
+				time.Sleep(r.SleepBeforeSubmittingAgain * time.Minute)
 			}
 			r.Started = false
+			r.lastExperiment.Wait()
+			fmt.Printf("Runtime: all jobs completed, terminating...")
 		}(r)
 	}
-	r.Started = true
 }
 
 func (r *Runtime) Fini() {
@@ -726,7 +866,9 @@ func (r *Runtime) Fini() {
 
 // Wait makes the current process wait for the termination of the webUI
 func (r *Runtime) Wait() {
-	r.wg.Wait()
+	if r.Started && r.wg != nil {
+		r.wg.Wait()
+	}
 }
 
 func (e *Experiment) Wait() {
@@ -735,16 +877,17 @@ func (e *Experiment) Wait() {
 		return
 	}
 
-	for e.Result == nil {
+	s := e.getStatus()
+	for s != jm.StatusDone && s != jm.StatusStop {
 		time.Sleep(e.runtime.ProgressFrequency * time.Minute)
-		s := e.getStatus()
-		if s == jm.StatusDone || s == jm.StatusStop {
-			err := e.postRunUpdate()
-			if err != nil {
-				log.Printf("postRunUpdate() failed")
-				return
-			}
-			break
+		s = e.getStatus()
+	}
+
+	if e.Result == nil {
+		err := e.postRunUpdate()
+		if err != nil {
+			log.Printf("postRunUpdate() failed")
+			return
 		}
 	}
 }
@@ -771,4 +914,26 @@ func (exps *Experiments) Wait(runtime *Runtime) {
 		}
 		time.Sleep(runtime.ProgressFrequency * time.Minute)
 	}
+}
+
+// GetHashFromFileName returns the experiment's hash based on the file name
+func GetHashFromFileName(filename string) (string, error) {
+	if strings.HasSuffix(filename, ".out") || strings.HasSuffix(filename, ".err") {
+		tokens := strings.Split(filename, "-")
+		if len(tokens) != 3 {
+			return "", fmt.Errorf("invalid format for output file: %s", filename)
+		}
+		return tokens[0], nil
+	}
+
+	if strings.HasSuffix(filename, ".sh") {
+		filename = strings.TrimSuffix(filename, ".sh")
+		tokens := strings.Split(filename, "-")
+		if len(tokens) != 3 {
+			return "", fmt.Errorf("invalid format: %s", filename)
+		}
+		return tokens[2], nil
+	}
+
+	return "", fmt.Errorf("invalid file name format: %s", filename)
 }
