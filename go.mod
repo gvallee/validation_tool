@@ -1,6 +1,6 @@
 module github.com/gvallee/validation_tool
 
-go 1.12
+go 1.13
 
 require (
 	github.com/gvallee/go_exec v1.1.0
