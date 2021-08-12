@@ -3,6 +3,8 @@ github.com/gvallee/go_exec v1.1.0 h1:3xhwLIcxY4VNGGPL5YZYxnWeTgLYU0PSOEMcO0gfi+Q
 github.com/gvallee/go_exec v1.1.0/go.mod h1:s9fSkVniLYlQUZb99zuioVH45nkvnYxw6vmGEaZCUPk=
 github.com/gvallee/go_hpc_jobmgr v1.1.0 h1:4DQke/QiJRu3/2O5W19xNvcU1xwqelX3PoQN/ItgmjQ=
 github.com/gvallee/go_hpc_jobmgr v1.1.0/go.mod h1:gsikmgiQ+su5Cbaj48ErVtXyyTxXSiJf8r6CEUiN2wI=
+github.com/gvallee/go_hpc_jobmgr v1.2.0 h1:+zwecc5bCweAyxyH4u6SQJPOebbDIiRakhm4x8LEGK8=
+github.com/gvallee/go_hpc_jobmgr v1.2.0/go.mod h1:gsikmgiQ+su5Cbaj48ErVtXyyTxXSiJf8r6CEUiN2wI=
 github.com/gvallee/go_software_build v1.0.0 h1:HnksQHnL/N2CtgkdzFLMHuqgKrUTfxGWL2GalvPdaG8=
 github.com/gvallee/go_software_build v1.0.0/go.mod h1:Wk1dQ3fx2ZYB7t6HF43zC5hRuLXnPZLzHeLkAxd/svo=
 github.com/gvallee/go_util v1.1.0/go.mod h1:fTexpwdH/n05Ziu0TXJIQsr7E+46QpBxNdeOOsyC0/s=

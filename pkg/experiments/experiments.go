@@ -98,6 +98,9 @@ type Experiment struct {
 	MaxExecTime string
 
 	ResultsDir string
+
+	OutputFilePrefix string
+	OutputFileSuffix string
 }
 
 type Experiments struct {
@@ -129,6 +132,9 @@ type Experiments struct {
 	MaxExecTime string
 
 	ResultsDir string
+
+	OutputFilePrefix string
+	OutputFileSuffix string
 }
 
 type Runtime struct {
@@ -372,9 +378,6 @@ func (r *Runtime) triggerExperiment() error {
 
 	e := r.pendingExperiments[0]
 	e.Result = new(ExperimentResult)
-
-	b := new(builder.Builder)
-
 	if e.Job == nil {
 		e.Job = new(job.Job)
 		e.Job.MaxExecTime = e.MaxExecTime
@@ -415,6 +418,7 @@ func (r *Runtime) triggerExperiment() error {
 	e.sysCfg = &sysCfg
 
 	if e.Env != nil {
+		b := new(builder.Builder)
 		b.Env.ScratchDir = e.Env.ScratchDir
 		b.Env.InstallDir = e.Env.InstallDir
 		b.Env.BuildDir = e.Env.BuildDir
@@ -488,7 +492,7 @@ func (r *Runtime) triggerExperiment() error {
 			expMPICfg.Implem.InstallDir = e.MPICfg.BuildEnv.InstallDir
 		}
 		expMPICfg.UserMpirunArgs = e.MpirunArgs // fixme: add the default args we get from config file
-		err = expMPICfg.Implem.Load()
+		err = expMPICfg.Implem.Load(nil)
 		if err != nil {
 			e.Result.ExecRes.Err = fmt.Errorf("unable to detect information about the MPI implementation to use: %s", err)
 			e.Result.Res.Pass = false
@@ -519,7 +523,8 @@ func (r *Runtime) triggerExperiment() error {
 		e.Job.RequiredModules = e.RequiredModules
 	}
 
-	log.Printf("Launching experiment %d\n", e.id)
+	log.Printf("Launching experiment %d from %s using %s\n", e.id, e.RunDir, e.LaunchScript)
+
 	e.Result.Res, e.Result.ExecRes = launcher.Run(e.Job, &expMPICfg, e.jobMgr, &sysCfg, nil)
 	if err != nil {
 		e.Result.ExecRes.Err = fmt.Errorf("failed to submit experiment: %s", e.Result.ExecRes.Err)
@@ -682,6 +687,29 @@ func GetRunsFromLogFiles(dir string) ([]SubmittedJob, error) {
 	return jobs, nil
 }
 
+func (e *Experiment) getHashWithCustomOutputFilename(filename string) string {
+	h := ""
+	// In some configurations, we just get a Slurm output file. In that case, we
+	// need to job ID from the filename and then look up that job to get the has
+	jobIDStr := strings.TrimPrefix(filename, e.OutputFilePrefix) // "slurm-")
+	jobIDStr = strings.TrimSuffix(jobIDStr, e.OutputFileSuffix)  // ".out")
+	jobID, err := strconv.Atoi(jobIDStr)
+	if err != nil {
+		return h
+	}
+	jobs, err := GetRunsFromLogFiles(e.ResultsDir)
+	if err != nil {
+		return h
+	}
+	for _, j := range jobs {
+		if j.ID == jobID {
+			h = j.Hash
+			break
+		}
+	}
+	return h
+}
+
 func (e *Experiment) getNumResults() (int, error) {
 	count := 0
 	resultFiles, err := expresults.GetFiles(e.ResultsDir)
@@ -691,30 +719,19 @@ func (e *Experiment) getNumResults() (int, error) {
 
 	for _, successfulResultFile := range resultFiles.SuccessfulExperiments {
 		filename := path.Base(successfulResultFile)
-		h, err := GetHashFromFileName(filename)
-		if err != nil {
-			// If the file name does not contain a hash, we check if it is because we
-			// only got a slurm output file.
-			if strings.HasPrefix(filename, "slurm-") {
-				// In some configuration, we just get a Slurm output file. In that case, we
-				// need to job ID from the filename and then look up that job to get the has
-				jobIDStr := strings.TrimPrefix(filename, "slurm-")
-				jobIDStr = strings.TrimSuffix(jobIDStr, ".out")
-				jobID, err := strconv.Atoi(jobIDStr)
-				if err != nil {
-					return -1, err
-				}
-				jobs, err := GetRunsFromLogFiles(e.ResultsDir)
-				if err != nil {
-					return -1, err
-				}
-				for _, j := range jobs {
-					if j.ID == jobID {
-						h = j.Hash
-						break
-					}
-				}
-			} else {
+		h := ""
+		if e.OutputFilePrefix != "" || e.OutputFileSuffix != "" {
+			h = e.getHashWithCustomOutputFilename(filename)
+			if h == "" {
+				// We do not want a failure when a result file is manually copied
+				// into the result directory (which would not appear in the job
+				// file)
+				continue
+			}
+		} else {
+			// The output file was automatically created by the tool
+			h, err = GetHashFromFileName(filename)
+			if err != nil {
 				return -1, fmt.Errorf("unable to get hash from %s: %w", successfulResultFile, err)
 			}
 		}
@@ -724,6 +741,18 @@ func (e *Experiment) getNumResults() (int, error) {
 	}
 
 	return count, nil
+}
+
+func (e *Experiment) removeMpirunArgsDuplicates() {
+	uniqueArgs := make(map[string]bool)
+	for _, args := range e.MpirunArgs {
+		uniqueArgs[args] = true
+	}
+	var newMpirunArgs []string
+	for args := range uniqueArgs {
+		newMpirunArgs = append(newMpirunArgs, args)
+	}
+	e.MpirunArgs = newMpirunArgs
 }
 
 func (e *Experiment) Run(r *Runtime) error {
@@ -766,6 +795,8 @@ func (e *Experiment) Run(r *Runtime) error {
 	if nExistingResults >= e.NumResults {
 		log.Printf("We already have all the required results")
 	}
+
+	e.removeMpirunArgsDuplicates()
 
 	for i := nExistingResults; i < e.NumResults; i++ {
 		e.runtime = r
@@ -816,6 +847,9 @@ func (e *Experiments) Run(r *Runtime) error {
 		if e.NumResults == 0 {
 			e.NumResults = 1
 		}
+
+		exp.OutputFilePrefix = e.OutputFilePrefix
+		exp.OutputFileSuffix = e.OutputFileSuffix
 		exp.NumResults = e.NumResults
 		exp.MaxExecTime = e.MaxExecTime
 
@@ -918,6 +952,13 @@ func (exps *Experiments) Wait(runtime *Runtime) {
 
 // GetHashFromFileName returns the experiment's hash based on the file name
 func GetHashFromFileName(filename string) (string, error) {
+	if filename == "" {
+		return "", fmt.Errorf("invalid empty filename")
+	}
+
+	if strings.HasPrefix(filename, "/") {
+		filename = path.Base(filename)
+	}
 	if strings.HasSuffix(filename, ".out") || strings.HasSuffix(filename, ".err") {
 		tokens := strings.Split(filename, "-")
 		if len(tokens) != 3 {
