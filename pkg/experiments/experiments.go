@@ -711,10 +711,14 @@ func (e *Experiment) getHashWithCustomOutputFilename(filename string) string {
 }
 
 func (e *Experiment) getNumResults() (int, error) {
+	if e.ResultsDir == "" {
+		return -1, fmt.Errorf("undefined result directory")
+	}
+
 	count := 0
 	resultFiles, err := expresults.GetFiles(e.ResultsDir)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("unable to get results file(s): %w", err)
 	}
 
 	for _, successfulResultFile := range resultFiles.SuccessfulExperiments {

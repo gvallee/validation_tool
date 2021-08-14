@@ -6,6 +6,7 @@
 package results
 
 import (
+	"fmt"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func failed(dir string, filePrefix string) (bool, error) {
 func GetFiles(dir string) (*ResultFiles, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to read %s: %w", dir, err)
 	}
 
 	resultFiles := new(ResultFiles)

@@ -120,6 +120,7 @@ func TestGetNumResults(t *testing.T) {
 	e := new(Experiment)
 	e.id = 0
 	e.RunDir = tempDir
+	e.ResultsDir = e.RunDir
 	e.App = new(app.Info)
 	e.App.Name = "test_app"
 	e.Job = new(job.Job)
@@ -142,7 +143,7 @@ func TestGetNumResults(t *testing.T) {
 	// No job log file exists, we should get 0
 	n, err := e.getNumResults()
 	if n != 0 || err != nil {
-		t.Fatalf("e.getNumResults() returned %d instead of 0", n)
+		t.Fatalf("e.getNumResults() returned %d instead of 0 (err: %s)", n, err)
 	}
 
 	// Create a job log file with a dummy entry
