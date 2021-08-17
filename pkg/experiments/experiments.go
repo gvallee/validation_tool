@@ -205,9 +205,9 @@ func ToHash(hashText string) string {
 	return fmt.Sprintf("%x", hash)
 }
 
-func (e *Experiment) toHash() string {
+func (e *Experiment) toHash() (string, error) {
 	if e.Platform == nil {
-		return ""
+		return "", fmt.Errorf("undefined platform")
 	}
 	var hashText []string
 
@@ -220,7 +220,7 @@ func (e *Experiment) toHash() string {
 		hashText = append(hashText, e.MPICfg.MPI.ID)
 		hashText = append(hashText, e.MPICfg.MPI.Version)
 	}
-	return ToHash(strings.Join(hashText, "\n"))
+	return ToHash(strings.Join(hashText, "\n")), nil
 }
 
 func parseJobLogFile(path string) ([]SubmittedJob, error) {
@@ -314,7 +314,11 @@ func (e *Experiment) addManifest() error {
 
 func (e *Experiment) addJobsToLog() error {
 	if e.Hash == "" {
-		e.Hash = e.toHash()
+		var err error
+		e.Hash, err = e.toHash()
+		if err != nil {
+			return fmt.Errorf("addJobsToLog() - unable to get experiment's hash: %w", err)
+		}
 		if e.Hash == "" {
 			return fmt.Errorf("addJobsToLog() - unable to get experiment's hash")
 		}
@@ -773,7 +777,11 @@ func (e *Experiment) Run(r *Runtime) error {
 	// generates the batch script, in which case we really do not want to
 	// overwrite it
 	if e.Hash == "" {
-		e.Hash = e.toHash()
+		var err error
+		e.Hash, err = e.toHash()
+		if err != nil {
+			return fmt.Errorf("unable to set experiment's hash: %w", err)
+		}
 	}
 	if e.Hash == "" {
 		return fmt.Errorf("e.Run() - unable to get experiment's hash")
