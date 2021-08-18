@@ -38,6 +38,9 @@ func failed(dir string, filePrefix string) (bool, error) {
 	return false, nil
 }
 
+// GetFiles returns the list of result files from a given directory. The content of the files
+// will be analyzed to discover erroneous outputs (job that did not run successfully). This
+// function does not associate experiments' labels with result files.
 func GetFiles(dir string) (*ResultFiles, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {

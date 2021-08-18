@@ -53,6 +53,9 @@ type Experiment struct {
 	// id is an internal id assigned to the experiment
 	id int
 
+	// isDefunc specifies whether an experiment has been identified as not functional
+	isDefunc bool
+
 	// App gathers all the data about the application to include in the container
 	App *app.Info
 
@@ -443,6 +446,7 @@ func (r *Runtime) triggerExperiment() error {
 				if res.Err != nil {
 					e.Result.ExecRes.Err = fmt.Errorf("unable to install the experiment software: %s", res.Err)
 					e.Result.Res.Pass = false
+					e.isDefunc = true
 					log.Printf("unable to install the experiment software: %s", res.Err)
 					goto ExpCompleted
 				}
@@ -569,6 +573,9 @@ ExpCompleted:
 }
 
 func (e *Experiment) getStatus() jm.JobStatus {
+	if e.isDefunc {
+		return jm.StatusDone
+	}
 	if e.jobMgr == nil {
 		// The experiment is defined but not yet submitted
 		return jm.StatusPending
