@@ -136,7 +136,7 @@ func TestGetNumResults(t *testing.T) {
 	e.Platform.Name = "dummy_platform"
 
 	e.Hash, err = e.toHash()
-	if err == nil {
+	if err != nil {
 		t.Fatalf("unable to set experiment's hash: %s", err)
 	}
 	if e.Hash == "" {
