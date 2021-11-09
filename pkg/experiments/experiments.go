@@ -31,6 +31,7 @@ import (
 	"github.com/gvallee/go_software_build/pkg/buildenv"
 	"github.com/gvallee/go_software_build/pkg/builder"
 	"github.com/gvallee/go_util/pkg/util"
+	"github.com/gvallee/validation_tool/pkg/label"
 	"github.com/gvallee/validation_tool/pkg/platform"
 	expresults "github.com/gvallee/validation_tool/pkg/results"
 )
@@ -104,6 +105,8 @@ type Experiment struct {
 
 	OutputFilePrefix string
 	OutputFileSuffix string
+
+	Name string
 }
 
 type Experiments struct {
@@ -828,6 +831,13 @@ func (e *Experiment) Run(r *Runtime) error {
 		r.pendingExperiments = append(r.pendingExperiments, e)
 		if !r.Started {
 			r.Start()
+		}
+	}
+
+	if e.Name != "" && e.ResultsDir != "" && e.Hash != "" {
+		err = label.Save(e.ResultsDir, e.Hash, e.Name)
+		if err != nil {
+			return err
 		}
 	}
 
