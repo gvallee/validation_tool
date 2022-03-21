@@ -618,7 +618,14 @@ func (r *Runtime) checkCompletions(idx int) {
 	if s == jm.StatusDone || s == jm.StatusStop {
 		log.Printf("Experiment %d has completed; %d pending, %d running\n", r.runningExperiments[idx].id, len(r.pendingExperiments), len(r.runningExperiments))
 		if idx == 0 {
-			r.runningExperiments = r.runningExperiments[1:]
+			// The first element of the list completed
+			if len(r.runningExperiments) >= 2 {
+				// If the list has 2 or more elements, we remove the first element
+				r.runningExperiments = r.runningExperiments[1:]
+			} else {
+				// If the list has a single element (the one that completed), the list of experiments is now empty
+				r.runningExperiments = nil
+			}
 		} else {
 			r.runningExperiments = append(r.runningExperiments[:idx], r.runningExperiments[idx+1:]...)
 		}
