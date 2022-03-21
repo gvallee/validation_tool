@@ -246,7 +246,7 @@ func TestManifestParsing(t *testing.T) {
 	}
 	curMpiArgs := "-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1"
 	if curMpiArgs != data[expectedHash].MpirunArgs {
-		t.Fatalf("invalid mpiruna arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
+		t.Fatalf("invalid mpirun arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
 	}
 
 	expectedHash = "5099182dacdc34761affd0f586a6e1481b747b4443f7882a90d12fe9"
@@ -256,7 +256,7 @@ func TestManifestParsing(t *testing.T) {
 	}
 	curMpiArgs = "-mca coll_hcoll_enable 1 --mca opal_common_ucx_opal_mem_hooks 1 -x UCX_TLS=dc,knem,self"
 	if curMpiArgs != data[expectedHash].MpirunArgs {
-		t.Fatalf("invalid mpiruna arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
+		t.Fatalf("invalid mpirun arguments: %s instead of %s", curMpiArgs, data[expectedHash].MpirunArgs)
 	}
 
 }
