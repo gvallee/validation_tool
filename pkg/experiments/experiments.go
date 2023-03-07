@@ -434,7 +434,7 @@ func (r *Runtime) triggerExperiment() error {
 		b.Env.BuildDir = e.Env.BuildDir
 		if e.App != nil {
 			b.App.Name = e.App.Name
-			b.App.URL = e.App.URL
+			b.App.Source.URL = e.App.Source.URL
 			b.App.BinPath = e.App.BinPath
 
 			if !util.FileExists(b.App.BinPath) {
